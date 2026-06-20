@@ -1,0 +1,65 @@
+name: media_canvas
+description: "Media Canvas — play multiple videos, images and GIFs at once with independent controls, free placement and layering."
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+
+  # Cross-platform (Windows + Android) media playback via libmpv.
+  # Handles multiple simultaneous FHD videos with GPU-accelerated decoding.
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_video: ^1.0.5
+  # Resolves the multi-instance deadlock on older Dart SDKs (safe to keep).
+  media_kit_native_event_loop: ^1.0.9
+
+  # Local file picking (video / image / gif) on Windows & Android.
+  file_picker: ^8.1.2
+
+  # Saving / loading board layouts to disk as JSON.
+  path_provider: ^2.1.4
+
+  # Keep the screen awake while a board is open (Windows + Android, no perms).
+  wakelock_plus: ^1.2.8
+
+  # Fetch network image/gif bytes for PNG export compositing.
+  http: ^1.2.2
+  youtube_explode_dart: ^3.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+
+# App launcher icon — generated into each platform with:
+#   dart run flutter_launcher_icons
+# Source art: assets/icon/app_icon.png (full) + app_icon_fg.png (adaptive fg).
+flutter_launcher_icons:
+  image_path: "assets/icon/app_icon.png"
+  android: true
+  adaptive_icon_background: "#1A1816"
+  adaptive_icon_foreground: "assets/icon/app_icon_fg.png"
+  ios: true
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    background_color: "#1A1816"
+    theme_color: "#C9A24B"
+  windows:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
