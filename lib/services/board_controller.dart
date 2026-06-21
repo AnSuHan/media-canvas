@@ -7,7 +7,8 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../models/app_settings.dart';
 import '../models/media_item.dart';
-import 'youtube_resolver.dart';
+import 'hls_ad_filter.dart';
+import 'media_url_resolver.dart';
 
 /// Bundles a video item's [Player] and [VideoController] together so the UI
 /// can render and control it. Non-video items never get one of these.
@@ -122,14 +123,28 @@ class BoardController extends ChangeNotifier {
 
   /// Turns an item's stored source into a URL the engine can actually open.
   ///
-  /// YouTube links are resolved to a direct stream URL on the fly (libmpv
-  /// can't play a watch page without yt-dlp). Everything else goes through
-  /// [_resolveSource].
+  /// Any network link — YouTube, Vimeo, a news page with one embedded clip, or
+  /// a direct .mp4 — is resolved to a direct stream URL on the fly (see
+  /// [resolvePlayableUrl]). Resolving to the raw stream also strips the page's
+  /// ads, since libmpv never loads the publisher's ad-serving HTML/JS. Local
+  /// files go through [_resolveSource].
   Future<String> _resolvePlayable(MediaItem item) async {
-    if (item.sourceKind == SourceKind.network && isYouTubeUrl(item.source)) {
-      return resolveYouTube(item.source);
+    if (item.sourceKind == SourceKind.network) {
+      final url = await resolvePlayableUrl(item.source);
+      // If the resolved stream is HLS with server-stitched ads (SSAI), hand
+      // libmpv a rewritten playlist that skips the ad segments. Falls back to
+      // the original URL when there's nothing to strip or it can't be fetched.
+      final adFree = await filterHlsAds(url);
+      return adFree ?? url;
     }
     return _resolveSource(item);
+  }
+
+  /// Resolves a network item to the *direct, progressive* stream URL to
+  /// download (e.g. a YouTube muxed mp4). Unlike playback this skips the HLS
+  /// ad-filter rewrite, since a download wants the original single file.
+  Future<String> resolveDownloadUrl(MediaItem item) {
+    return resolvePlayableUrl(item.source);
   }
 
   /// media_kit's [Media] wants a URI for local files. A raw Windows path

@@ -1,11 +1,14 @@
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../models/media_item.dart';
 import '../services/board_controller.dart';
+import '../services/download/download.dart';
 import '../theme.dart';
 
 /// One placeable item on the board. Renders the media, lets the user drag it
@@ -55,6 +58,8 @@ class _BoardItemWidgetState extends State<BoardItemWidget> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => controller.select(item.id),
+        // Long-press a URL-registered video to download it to disk.
+        onLongPress: _canDownload ? _downloadVideo : null,
         // A single ScaleGesture handles both one-finger drag (scale stays 1)
         // and two-finger pinch-to-zoom / twist-to-rotate.
         onScaleStart: (_) {
@@ -140,6 +145,125 @@ class _BoardItemWidgetState extends State<BoardItemWidget> {
         child: ClipRect(child: _MediaSurface(item: item, controller: controller)),
       ),
     );
+  }
+
+  /// Only network-sourced videos can be downloaded (local files already exist
+  /// on disk; images/gifs aren't the feature's target).
+  bool get _canDownload =>
+      widget.item.isVideo && widget.item.sourceKind == SourceKind.network;
+
+  /// Long-press handler: resolve the item to a direct stream, let the user pick
+  /// a destination, and download it with a live, cancellable progress dialog.
+  Future<void> _downloadVideo() async {
+    final item = widget.item;
+    final controller = widget.controller;
+    controller.select(item.id);
+
+    final messenger = ScaffoldMessenger.of(context);
+    void toast(String msg) =>
+        messenger.showSnackBar(SnackBar(content: Text(msg)));
+
+    const downloader = VideoDownloader();
+
+    // 1) Resolve to a direct stream / manifest.
+    String url;
+    try {
+      url = await controller.resolveDownloadUrl(item);
+    } catch (_) {
+      toast('다운로드 주소를 가져오지 못했습니다.');
+      return;
+    }
+    if (!downloader.canDownload(url)) {
+      toast('이 주소는 동영상 파일로 저장할 수 없습니다.');
+      return;
+    }
+
+    // 2) Ask where to save.
+    final suggested = downloader.suggestName(item.title, url);
+    String? savePath;
+    try {
+      savePath = await FilePicker.platform.saveFile(
+        dialogTitle: '동영상 저장',
+        fileName: suggested,
+        type: FileType.video,
+      );
+    } catch (_) {
+      savePath = null;
+    }
+    if (savePath == null) return; // cancelled / unsupported
+    if (!savePath.contains('.')) savePath = '$savePath.mp4';
+    if (!mounted) return;
+
+    // 3) Download with a cancellable progress dialog. Closing [client] aborts
+    //    the in-flight stream so "취소" really stops the transfer.
+    final progress = ValueNotifier<double>(0);
+    final client = http.Client();
+    var cancelled = false;
+    var dialogOpen = true;
+
+    void closeDialog() {
+      if (dialogOpen && mounted) {
+        dialogOpen = false;
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('동영상 다운로드 중…'),
+        content: ValueListenableBuilder<double>(
+          valueListenable: progress,
+          builder: (_, v, __) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              LinearProgressIndicator(value: v > 0 ? v : null),
+              const SizedBox(height: 10),
+              Text(v > 0 ? '${(v * 100).toStringAsFixed(0)}%' : '시작하는 중…'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              cancelled = true;
+              dialogOpen = false;
+              client.close(); // aborts the stream
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('취소'),
+          ),
+        ],
+      ),
+    );
+
+    final saveTo = savePath;
+    var writtenPath = saveTo;
+    try {
+      // The facade picks progressive vs. adaptive (HLS/DASH) and normalizes
+      // progress; adaptive streams may return a corrected .ts/.mp4 path.
+      writtenPath = await downloader.download(
+        url,
+        saveTo,
+        client: client,
+        onProgress: (fraction) {
+          if (fraction != null) progress.value = fraction;
+        },
+      );
+      closeDialog();
+      toast('저장 완료: $writtenPath');
+    } catch (e) {
+      closeDialog();
+      if (!cancelled) toast('다운로드 실패: $e');
+      // Best-effort cleanup of a partial file on cancel/failure.
+      try {
+        await File(writtenPath).delete();
+      } catch (_) {}
+    } finally {
+      client.close();
+      progress.dispose();
+    }
   }
 
   Widget _resizeHandle() {

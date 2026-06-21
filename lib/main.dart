@@ -7,7 +7,7 @@ import 'models/media_item.dart';
 import 'services/board_controller.dart';
 import 'services/board_exporter.dart';
 import 'services/layout_store.dart';
-import 'services/youtube_resolver.dart';
+import 'services/media_url_resolver.dart';
 import 'theme.dart';
 import 'widgets/board_item_widget.dart';
 import 'widgets/settings_page.dart';
@@ -111,7 +111,7 @@ class _BoardPageState extends State<BoardPage> {
               controller: ctrl,
               autofocus: true,
               decoration: const InputDecoration(
-                hintText: 'https://… (mp4, jpg, gif, YouTube link)',
+                hintText: 'https://… (any video page or link, mp4, jpg, gif)',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -148,7 +148,9 @@ class _BoardPageState extends State<BoardPage> {
         kind: resolvedKind,
         sourceKind: SourceKind.network,
         source: url,
-        title: youtube ? 'YouTube' : 'URL ${resolvedKind.name}',
+        title: youtube
+            ? 'YouTube'
+            : (resolvedKind == MediaKind.video ? 'Video' : 'URL ${resolvedKind.name}'),
         width: resolvedKind == MediaKind.video ? w : w * 0.72,
         height: resolvedKind == MediaKind.video ? w * 0.5625 : w * 0.55,
       ));

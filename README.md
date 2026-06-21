@@ -10,6 +10,13 @@
 - **자유 배치**: 드래그로 이동, 우하단 핸들로 크기 조정, 회전·투명도 슬라이더.
 - **Stack 레이어(depth)**: 맨 앞으로 / 앞으로 / 뒤로 / 맨 뒤로 — 비디오·이미지·GIF 를 겹쳐 배치.
 - **이미지 · GIF**: 로컬 파일과 URL 모두 지원 (GIF 자동 재생).
+- **모든 동영상 링크 지원**: 유튜브뿐 아니라 임의의 동영상 페이지/링크. URL 을 넣으면 페이지 HTML 에서 동영상 스트림을 추출해 재생 — 페이지에 동영상이 하나면 그것을 자동으로 재생. (`<video>`/`<source>`, OG/Twitter 메타, JSON-LD, 인라인 스크립트의 m3u8/mp4, iframe 플레이어 1단계 추적)
+- **광고 자동 차단**:
+  - *페이지 광고*: 웹뷰/임베드 대신 직접 스트림만 재생하므로 프리롤·오버레이·배너 등 페이지 광고 머신이 아예 로드되지 않음. 광고/트래커 호스트 URL 은 후보에서 제외.
+  - *서버 삽입 광고(SSAI)*: HLS 재생목록의 SCTE-35 마커(`#EXT-X-CUE-OUT`/`CUE-IN`, `DATERANGE`)를 읽어 광고 세그먼트를 제거한 재생목록으로 재생 → 광고 구간 자동 스킵, 본편만 이어서 재생.
+- **URL 영상 다운로드**: URL 로 등록한 영상을 **길게 누르면** 저장 위치를 고르고 진행률·취소가 있는 다운로드 시작.
+  - *progressive* (mp4/webm 등, 유튜브 포함): 직접 스트리밍 저장.
+  - *adaptive* (HLS `.m3u8` / DASH `.mpd`): 세그먼트를 받아 하나로 합쳐 저장(HLS TS→`.ts`, fMP4/DASH→`.mp4`). AES-128 암호화 HLS 는 자동 복호화, SSAI 광고는 제거 후 저장.
 - **설정 화면**: 새 미디어 기본값(볼륨·음소거·반복·재생), 캔버스 배경(점/격자/단색), 그리드 스냅, 동작 옵션.
 - **파일 추출/가져오기**:
   - 보드를 `.board.json` 파일로 내보내기 → 다른 기기에서 다시 열기.
@@ -48,6 +55,7 @@ flutter run -d <device-id> # 안드로이드 (flutter devices 로 id 확인)
 
 - 비디오 개수가 많아지면 기기의 하드웨어 디코더 한계(보통 5~16개)에 따라 끊길 수 있습니다.
 - PNG 합성 시 영상은 "현재 프레임"이 캡처됩니다. 재생 중이라면 캡처 시점의 화면이 담깁니다.
+- 다운로드 한계: DASH 에서 오디오·비디오가 **별도 트랙**으로 분리된 경우 ffmpeg 없이 한 컨테이너로 합칠 수 없어, 최고 화질 **비디오 트랙만**(무음) 저장됩니다. 매니페스트를 계속 갱신하는 라이브 SSAI 는 한 번의 재작성으로 추적하지 않습니다.
 - 이 환경에서는 Flutter 컴파일·실행을 할 수 없어 빌드 검증은 못 했습니다. 처음 `flutter run` 시 패키지 버전 충돌이 나면 `flutter pub upgrade` 로 맞추세요.
 
 ## 파일 추출/가져오기 (네이티브 저장 대화상자)
@@ -73,11 +81,33 @@ lib/
 ├── services/
 │   ├── board_controller.dart       # 상태·플레이어·z-order·전역제어·설정·wakelock
 │   ├── board_exporter.dart         # PNG 합성 (영상 프레임 포함)
-│   └── layout_store.dart           # 저장/불러오기 + 파일 추출/가져오기 + 설정 영속화
+│   ├── layout_store.dart           # 저장/불러오기 + 파일 추출/가져오기 + 설정 영속화
+│   ├── media_url_resolver.dart     # 임의 URL → 직접 스트림 추출 (+ 페이지 광고 차단)
+│   ├── hls_ad_filter.dart          # HLS SSAI 광고 세그먼트 제거 (재생·다운로드 공용)
+│   └── download/                   # ⬇ 동영상 다운로드 모듈 (추후 패키지 분리 가능)
+│       ├── download.dart           #   배럴(공개 API) — 이 파일만 import
+│       ├── video_downloader.dart   #   VideoDownloader 파사드(단일 진입점)
+│       ├── progressive_downloader.dart  # mp4/webm 등 단일 파일 스트리밍 저장
+│       └── adaptive_downloader.dart     # HLS/DASH 세그먼트 다운로드·복호화·합치기
 └── widgets/
-    ├── board_item_widget.dart      # 드래그/리사이즈 가능한 개별 미디어 위젯
+    ├── board_item_widget.dart      # 드래그/리사이즈 가능한 개별 미디어 위젯 (길게눌러 다운로드)
     └── settings_page.dart          # 설정 화면
 ```
+
+### 다운로드 모듈 (`lib/services/download/`)
+
+동영상 다운로드 로직은 **자체 완결형 모듈**로 분리되어 있어 추후 별도 패키지로 떼어낼 수 있습니다.
+
+- **공개 API**: `download.dart` 배럴 하나만 import 하고, [`VideoDownloader`] 파사드를 사용합니다. UI 는 progressive/adaptive 구분이나 하위 함수를 직접 알 필요가 없습니다.
+  ```dart
+  const dl = VideoDownloader();
+  if (dl.canDownload(url)) {
+    final path = await dl.download(url, savePath,
+        client: client,                       // client.close() 로 취소
+        onProgress: (f) => print('${(f ?? 0) * 100}%'));
+  }
+  ```
+- **경계(의존성)**: 외부 `http`·`pointycastle`·`xml` 와, HLS 매니페스트 헬퍼인 `../hls_ad_filter.dart` 에만 의존합니다. 앱 위젯·컨트롤러·모델을 전혀 모릅니다(URL·파일경로만 주고받음). → 패키지로 추출 시 `hls_ad_filter.dart` 만 함께 옮기면 됩니다.
 
 ## 사용 팁
 

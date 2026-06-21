@@ -1,7 +1,7 @@
 name: media_canvas
 description: "Media Canvas — play multiple videos, images and GIFs at once with independent controls, free placement and layering."
 publish_to: "none"
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -31,6 +31,11 @@ dependencies:
   # Fetch network image/gif bytes for PNG export compositing.
   http: ^1.2.2
   youtube_explode_dart: ^3.1.0
+
+  # Parse DASH (.mpd) manifests when downloading adaptive streams.
+  xml: ^6.5.0
+  # AES-128 decryption for fetching AES-encrypted HLS segments.
+  pointycastle: ^3.9.1
 
 dev_dependencies:
   flutter_test:
