@@ -1,7 +1,7 @@
 name: media_canvas
 description: "Media Canvas — play multiple videos, images and GIFs at once with independent controls, free placement and layering."
 publish_to: "none"
-version: 1.0.1+2
+version: 1.0.2+3
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

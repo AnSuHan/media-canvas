@@ -9,6 +9,7 @@ import '../models/app_settings.dart';
 import '../models/media_item.dart';
 import 'download/download.dart';
 import 'hls_ad_filter.dart';
+import 'instagram_resolver.dart';
 import 'media_url_resolver.dart';
 import 'youtube_resolver.dart' show listYouTubeStreams;
 
@@ -95,6 +96,37 @@ class BoardController extends ChangeNotifier {
     }
     _selectedId = item.id;
     notifyListeners();
+  }
+
+  /// Resolves an Instagram post link and adds **every** photo/video in it to
+  /// the board, cascaded so they don't fully overlap. Returns the number of
+  /// items added (0 if nothing could be resolved). [idFor] supplies a unique
+  /// id per item; [compact] picks phone-friendly sizing.
+  Future<int> addInstagramPost(
+    String url, {
+    required String Function(int index) idFor,
+    bool compact = false,
+  }) async {
+    final media = await resolveInstagram(url);
+    if (media.isEmpty) return 0;
+
+    final w = compact ? 200.0 : 320.0;
+    const step = 28.0;
+    for (var i = 0; i < media.length; i++) {
+      final m = media[i];
+      await addItem(MediaItem(
+        id: idFor(i),
+        kind: m.isVideo ? MediaKind.video : MediaKind.image,
+        sourceKind: SourceKind.network,
+        source: m.url,
+        title: m.isVideo ? 'Instagram ${i + 1}' : 'Instagram ${i + 1}',
+        x: 40 + i * step,
+        y: 40 + i * step,
+        width: m.isVideo ? w : w * 0.8,
+        height: m.isVideo ? w * 0.5625 : w,
+      ));
+    }
+    return media.length;
   }
 
   Future<void> _spinUpPlayer(MediaItem item) async {

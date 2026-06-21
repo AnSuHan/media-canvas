@@ -6,6 +6,7 @@ import 'models/app_settings.dart';
 import 'models/media_item.dart';
 import 'services/board_controller.dart';
 import 'services/board_exporter.dart';
+import 'services/instagram_resolver.dart';
 import 'services/layout_store.dart';
 import 'services/media_url_resolver.dart';
 import 'theme.dart';
@@ -111,7 +112,7 @@ class _BoardPageState extends State<BoardPage> {
               controller: ctrl,
               autofocus: true,
               decoration: const InputDecoration(
-                hintText: 'https://… (any video page or link, mp4, jpg, gif)',
+                hintText: 'https://… (video/이미지 링크, YouTube, Instagram 게시물)',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -139,6 +140,11 @@ class _BoardPageState extends State<BoardPage> {
     );
     if (added == true && ctrl.text.trim().isNotEmpty) {
       final url = ctrl.text.trim();
+      // An Instagram post link expands into all of its photos/videos.
+      if (isInstagramUrl(url)) {
+        await _addInstagramPost(url, compact);
+        return;
+      }
       // A YouTube link is always a video, whatever the segmented button says.
       final youtube = isYouTubeUrl(url);
       final resolvedKind = youtube ? MediaKind.video : kind;
@@ -155,6 +161,31 @@ class _BoardPageState extends State<BoardPage> {
         height: resolvedKind == MediaKind.video ? w * 0.5625 : w * 0.55,
       ));
     }
+  }
+
+  /// Resolves an Instagram post and adds all of its photos/videos, with a
+  /// loading + result snackbar.
+  Future<void> _addInstagramPost(String url, bool compact) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(
+        content: Text('인스타그램 게시물을 불러오는 중…'),
+        duration: Duration(seconds: 30)));
+    int count;
+    try {
+      count = await controller.addInstagramPost(
+        url,
+        idFor: (_) => _newId(),
+        compact: compact,
+      );
+    } catch (_) {
+      count = 0;
+    }
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text(count > 0
+          ? '인스타그램 미디어 $count개를 추가했습니다.'
+          : '인스타그램 게시물을 불러오지 못했습니다. (비공개이거나 로그인이 필요할 수 있어요)'),
+    ));
   }
 
   MediaKind _kindFromExt(String ext) {
