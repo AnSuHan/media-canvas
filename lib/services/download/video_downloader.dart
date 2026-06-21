@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 
 import 'adaptive_downloader.dart';
+import 'download_option.dart';
 import 'progressive_downloader.dart';
 
 /// Progress callback: [fraction] is 0..1, or null when the total size is not
@@ -29,7 +30,47 @@ class VideoDownloader {
       isAdaptiveStream(url) || isDownloadableStream(url);
 
   /// A friendly, filesystem-safe file name derived from [title] and [url].
-  String suggestName(String title, String url) => suggestFileName(title, url);
+  /// Embeds the app [version] (e.g. `Clip_v1.0.1.mp4`) and an optional
+  /// [quality] label when given.
+  String suggestName(String title, String url, {String? version, String? quality}) =>
+      suggestFileName(title, url, version: version, quality: quality);
+
+  /// Lists the selectable qualities for an adaptive manifest [url]. For a
+  /// progressive (single-file) URL returns an empty list (no choice to make).
+  Future<List<DownloadOption>> listQualities(String url, {http.Client? client}) {
+    if (isAdaptiveStream(url)) {
+      return listAdaptiveQualities(url, client: client);
+    }
+    return Future.value(const []);
+  }
+
+  /// Downloads a specific [option] to [savePath], returning the path written.
+  /// Routes adaptive vs. progressive and passes the DASH quality selector.
+  Future<String> downloadOption(
+    DownloadOption option,
+    String savePath, {
+    DownloadProgress? onProgress,
+    http.Client? client,
+  }) async {
+    if (option.adaptive) {
+      return downloadAdaptiveStream(
+        option.url,
+        savePath,
+        client: client,
+        dashBandwidth: option.dashBandwidth,
+        onProgress: (done, total) =>
+            onProgress?.call(total > 0 ? done / total : null),
+      );
+    }
+    await downloadToFile(
+      option.url,
+      savePath,
+      client: client,
+      onProgress: (received, total) =>
+          onProgress?.call(total != null && total > 0 ? received / total : null),
+    );
+    return savePath;
+  }
 
   /// Downloads [url] to [savePath], returning the path actually written. For
   /// adaptive streams the extension is corrected (`.ts`/`.mp4`) to match the

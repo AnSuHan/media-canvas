@@ -36,6 +36,8 @@ dependencies:
   xml: ^6.5.0
   # AES-128 decryption for fetching AES-encrypted HLS segments.
   pointycastle: ^3.9.1
+  # Read the app version to embed it in downloaded file names.
+  package_info_plus: ^9.0.0
 
 dev_dependencies:
   flutter_test:

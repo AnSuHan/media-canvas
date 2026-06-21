@@ -20,7 +20,11 @@ bool isDownloadableStream(String url) {
 
 /// Builds a friendly, filesystem-safe file name for the download from the
 /// item's [title] and the stream [url] (used to guess the extension).
-String suggestFileName(String title, String url) {
+///
+/// When [version] (the app version) is given it's embedded before the
+/// extension, e.g. `Clip_v1.0.1.mp4`. An optional [quality] label (e.g.
+/// `720p`) is appended too, so files are self-describing.
+String suggestFileName(String title, String url, {String? version, String? quality}) {
   var base = title.trim();
   if (base.isEmpty) base = 'video';
   // Strip characters illegal on Windows/Android file systems.
@@ -28,8 +32,16 @@ String suggestFileName(String title, String url) {
   if (base.isEmpty) base = 'video';
 
   final ext = _extensionFromUrl(url) ?? 'mp4';
-  if (base.toLowerCase().endsWith('.$ext')) return base;
-  return '$base.$ext';
+  // Drop any extension the title already carries so suffixes land correctly.
+  if (base.toLowerCase().endsWith('.$ext')) {
+    base = base.substring(0, base.length - ext.length - 1);
+  }
+
+  final q = (quality != null && quality.trim().isNotEmpty)
+      ? '_${quality.replaceAll(RegExp(r'[\\/:*?"<>|\s]'), '')}'
+      : '';
+  final v = (version != null && version.trim().isNotEmpty) ? '_v${version.trim()}' : '';
+  return '$base$q$v.$ext';
 }
 
 String? _extensionFromUrl(String url) {

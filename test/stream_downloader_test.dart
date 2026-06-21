@@ -189,6 +189,68 @@ seg1.ts
     });
   });
 
+  group('quality listing', () {
+    final base = Uri.parse('https://cdn.example.com/v/master.m3u8');
+
+    test('parseHlsVariants lists variants high→low, deduped by resolution', () {
+      const master = '''#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+low.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2400000,RESOLUTION=1280x720
+mid.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720
+mid_hi.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=1920x1080
+high.m3u8''';
+      final opts = parseHlsVariants(master, base);
+      expect(opts.map((o) => o.label), ['1080p', '720p', '360p']);
+      // 720p deduped to the higher-bitrate rendition.
+      final p720 = opts.firstWhere((o) => o.label == '720p');
+      expect(p720.url, 'https://cdn.example.com/v/mid_hi.m3u8');
+      expect(opts.every((o) => o.adaptive), isTrue);
+    });
+
+    test('parseDashQualities lists representations with bandwidth selector', () {
+      const mpd = '''<?xml version="1.0"?>
+<MPD>
+  <Period>
+    <AdaptationSet contentType="video">
+      <Representation id="v0" bandwidth="800000" height="360"/>
+      <Representation id="v1" bandwidth="2400000" height="720"/>
+    </AdaptationSet>
+  </Period>
+</MPD>''';
+      final url = 'https://cdn.example.com/dash/m.mpd';
+      final opts = parseDashQualities(mpd, Uri.parse(url), url);
+      expect(opts.map((o) => o.label), ['720p', '360p']);
+      expect(opts.first.dashBandwidth, 2400000);
+      expect(opts.every((o) => o.url == url && o.adaptive), isTrue);
+    });
+
+    test('parseDashManifest honors preferBandwidth selection', () {
+      const mpd = '''<?xml version="1.0"?>
+<MPD mediaPresentationDuration="PT12S">
+  <Period>
+    <AdaptationSet contentType="video">
+      <Representation id="lo" bandwidth="800000" height="360">
+        <SegmentTemplate media="lo-\$Number\$.m4s" timescale="1" duration="6" startNumber="1"/>
+      </Representation>
+      <Representation id="hi" bandwidth="2400000" height="720">
+        <SegmentTemplate media="hi-\$Number\$.m4s" timescale="1" duration="6" startNumber="1"/>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>''';
+      final base = Uri.parse('https://cdn.example.com/dash/m.mpd');
+      // Default → best (hi).
+      expect(parseDashManifest(mpd, base).segments.first.toString(),
+          contains('hi-1.m4s'));
+      // Prefer the low rendition.
+      final lo = parseDashManifest(mpd, base, preferBandwidth: 800000);
+      expect(lo.segments.first.toString(), contains('lo-1.m4s'));
+    });
+  });
+
   group('downloadAdaptiveStream (HLS end-to-end)', () {
     test('master → variant → concatenated TS file', () async {
       const master = '''#EXTM3U

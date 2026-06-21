@@ -7,8 +7,10 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../models/app_settings.dart';
 import '../models/media_item.dart';
+import 'download/download.dart';
 import 'hls_ad_filter.dart';
 import 'media_url_resolver.dart';
+import 'youtube_resolver.dart' show listYouTubeStreams;
 
 /// Bundles a video item's [Player] and [VideoController] together so the UI
 /// can render and control it. Non-video items never get one of these.
@@ -145,6 +147,30 @@ class BoardController extends ChangeNotifier {
   /// ad-filter rewrite, since a download wants the original single file.
   Future<String> resolveDownloadUrl(MediaItem item) {
     return resolvePlayableUrl(item.source);
+  }
+
+  /// Lists the selectable download qualities for a network [item].
+  ///
+  /// Stitches together the source-specific listers: YouTube muxed streams, HLS
+  /// master variants, or DASH representations. For a single-quality source
+  /// (a plain mp4) returns one "원본" option so callers can treat all sources
+  /// uniformly.
+  Future<List<DownloadOption>> listDownloadOptions(MediaItem item) async {
+    final src = item.source;
+    if (isYouTubeUrl(src)) {
+      final streams = await listYouTubeStreams(src);
+      return [
+        for (final s in streams)
+          DownloadOption(
+              label: s.label, url: s.url, adaptive: false, height: s.height),
+      ];
+    }
+    final url = await resolvePlayableUrl(src);
+    if (isAdaptiveStream(url)) {
+      final qualities = await listAdaptiveQualities(url);
+      if (qualities.isNotEmpty) return qualities;
+    }
+    return [DownloadOption(label: '원본', url: url, adaptive: isAdaptiveStream(url))];
   }
 
   /// media_kit's [Media] wants a URI for local files. A raw Windows path

@@ -6,6 +6,7 @@ import 'package:pointycastle/export.dart';
 import 'package:xml/xml.dart';
 
 import '../hls_ad_filter.dart';
+import 'download_option.dart';
 
 /// Downloads *adaptive* streams (HLS `.m3u8` / DASH `.mpd`) into a single local
 /// file by fetching every media segment and concatenating them.
@@ -30,6 +31,105 @@ bool isAdaptiveStream(String url) {
 }
 
 // ---------------------------------------------------------------------------
+// Quality listing
+// ---------------------------------------------------------------------------
+
+/// Lists the selectable qualities of an adaptive manifest at [url] (HLS master
+/// variants or DASH video representations). For a plain media playlist (no
+/// variants) returns a single "원본" option.
+Future<List<DownloadOption>> listAdaptiveQualities(
+  String url, {
+  http.Client? client,
+}) async {
+  final ownClient = client == null;
+  final c = client ?? http.Client();
+  try {
+    final text = await _fetchText(c, url);
+    if (url.toLowerCase().contains('.mpd')) {
+      return parseDashQualities(text, Uri.parse(url), url);
+    }
+    if (text.contains('#EXT-X-STREAM-INF')) {
+      return parseHlsVariants(text, Uri.parse(url));
+    }
+    // Already a media playlist — single quality.
+    return [DownloadOption(label: '원본', url: url, adaptive: true)];
+  } finally {
+    if (ownClient) c.close();
+  }
+}
+
+/// Parses an HLS *master* playlist into one [DownloadOption] per variant,
+/// highest resolution first, de-duplicated by resolution (keeping the highest
+/// bitrate for each).
+List<DownloadOption> parseHlsVariants(String master, Uri base) {
+  final lines = master.split(RegExp(r'\r?\n'));
+  final byLabel = <String, DownloadOption>{};
+  for (var i = 0; i < lines.length; i++) {
+    final line = lines[i].trim();
+    if (!line.startsWith('#EXT-X-STREAM-INF')) continue;
+    final res = RegExp(r'RESOLUTION=(\d+)x(\d+)').firstMatch(line);
+    final bwM = RegExp(r'BANDWIDTH=(\d+)').firstMatch(line);
+    final height = res != null ? int.parse(res.group(2)!) : null;
+    final bandwidth = bwM != null ? int.parse(bwM.group(1)!) : null;
+    for (var j = i + 1; j < lines.length; j++) {
+      final cand = lines[j].trim();
+      if (cand.isEmpty || cand.startsWith('#')) continue;
+      final label = height != null
+          ? '${height}p'
+          : (bandwidth != null ? '${(bandwidth / 1000).round()} kbps' : '원본');
+      final opt = DownloadOption(
+        label: label,
+        url: base.resolve(cand).toString(),
+        adaptive: true,
+        height: height,
+        bandwidth: bandwidth,
+      );
+      final existing = byLabel[label];
+      if (existing == null || (bandwidth ?? 0) > (existing.bandwidth ?? 0)) {
+        byLabel[label] = opt;
+      }
+      break;
+    }
+  }
+  final out = byLabel.values.toList()
+    ..sort((a, b) =>
+        (b.height ?? b.bandwidth ?? 0).compareTo(a.height ?? a.bandwidth ?? 0));
+  return out;
+}
+
+/// Parses a DASH manifest into one [DownloadOption] per video representation,
+/// each carrying its bandwidth so the downloader can fetch that exact quality.
+List<DownloadOption> parseDashQualities(String mpdXml, Uri base, String mpdUrl) {
+  final root = XmlDocument.parse(mpdXml).rootElement;
+  final period = _first(root.findElements('Period'));
+  if (period == null) return const [];
+  final byLabel = <String, DownloadOption>{};
+  for (final aset in period.findElements('AdaptationSet')) {
+    if (!_isVideoAdaptation(aset)) continue;
+    final setHeight = int.tryParse(aset.getAttribute('maxHeight') ?? '');
+    for (final rep in aset.findElements('Representation')) {
+      final bw = int.tryParse(rep.getAttribute('bandwidth') ?? '');
+      if (bw == null) continue;
+      final height = int.tryParse(rep.getAttribute('height') ?? '') ?? setHeight;
+      final label = height != null ? '${height}p' : '${(bw / 1000).round()} kbps';
+      final opt = DownloadOption(
+        label: label,
+        url: mpdUrl,
+        adaptive: true,
+        height: height,
+        bandwidth: bw,
+        dashBandwidth: bw,
+      );
+      final existing = byLabel[label];
+      if (existing == null || bw > (existing.bandwidth ?? 0)) byLabel[label] = opt;
+    }
+  }
+  final out = byLabel.values.toList()
+    ..sort((a, b) => (b.bandwidth ?? 0).compareTo(a.bandwidth ?? 0));
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Public orchestrator
 // ---------------------------------------------------------------------------
 
@@ -42,12 +142,13 @@ Future<String> downloadAdaptiveStream(
   void Function(int done, int total)? onProgress,
   http.Client? client,
   bool stripAds = true,
+  int? dashBandwidth,
 }) async {
   final ownClient = client == null;
   final c = client ?? http.Client();
   try {
     if (url.toLowerCase().contains('.mpd')) {
-      return await _downloadDash(url, savePath, c, onProgress);
+      return await _downloadDash(url, savePath, c, onProgress, dashBandwidth);
     }
     return await _downloadHls(url, savePath, c, onProgress, stripAds);
   } finally {
@@ -117,9 +218,11 @@ Future<String> _downloadDash(
   String savePath,
   http.Client c,
   void Function(int, int)? onProgress,
+  int? preferBandwidth,
 ) async {
   final text = await _fetchText(c, url);
-  final plan = parseDashManifest(text, Uri.parse(url));
+  final plan =
+      parseDashManifest(text, Uri.parse(url), preferBandwidth: preferBandwidth);
   if (plan.segments.isEmpty) throw const HttpException('No DASH segments found');
 
   final outPath = _withExtension(savePath, 'mp4');
@@ -239,9 +342,13 @@ class DashPlan {
   final List<Uri> segments;
 }
 
-/// Parses a DASH `.mpd` manifest, selecting the highest-bitrate video
-/// representation and resolving its initialization + media segment URLs.
-DashPlan parseDashManifest(String mpdXml, Uri base) {
+/// Parses a DASH `.mpd` manifest, selecting a video representation and
+/// resolving its initialization + media segment URLs.
+///
+/// By default the highest-bitrate video representation is chosen; pass
+/// [preferBandwidth] to download a specific quality (matched by @bandwidth),
+/// falling back to the best if no representation matches.
+DashPlan parseDashManifest(String mpdXml, Uri base, {int? preferBandwidth}) {
   final mpd = XmlDocument.parse(mpdXml).rootElement;
   var b = _applyBaseUrl(mpd, base);
 
@@ -249,7 +356,7 @@ DashPlan parseDashManifest(String mpdXml, Uri base) {
   if (period == null) return DashPlan(null, const []);
   b = _applyBaseUrl(period, b);
 
-  // Pick the highest-bandwidth video representation.
+  // Pick the requested (or highest-bandwidth) video representation.
   XmlElement? bestSet;
   XmlElement? bestRep;
   var bestBw = -1;
@@ -257,12 +364,19 @@ DashPlan parseDashManifest(String mpdXml, Uri base) {
     if (!_isVideoAdaptation(aset)) continue;
     for (final rep in aset.findElements('Representation')) {
       final bw = int.tryParse(rep.getAttribute('bandwidth') ?? '') ?? 0;
+      if (preferBandwidth != null && bw == preferBandwidth) {
+        bestSet = aset;
+        bestRep = rep;
+        bestBw = bw;
+        break;
+      }
       if (bw > bestBw) {
         bestBw = bw;
         bestRep = rep;
         bestSet = aset;
       }
     }
+    if (preferBandwidth != null && bestBw == preferBandwidth) break;
   }
   if (bestRep == null || bestSet == null) return DashPlan(null, const []);
 

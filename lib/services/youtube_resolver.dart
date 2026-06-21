@@ -37,3 +37,42 @@ Future<String> resolveYouTube(String url) async {
     yt.close();
   }
 }
+
+/// One downloadable YouTube quality (a muxed audio+video stream).
+class YouTubeStreamOption {
+  YouTubeStreamOption(this.label, this.url, this.height);
+
+  /// Quality label, e.g. `720p`.
+  final String label;
+  final String url;
+  final int? height;
+}
+
+/// Lists the muxed (audio+video) qualities of a YouTube video, highest first,
+/// de-duplicated by quality label (keeping the highest-bitrate variant).
+///
+/// Muxed streams carry sound and download as one file (typically up to 720p).
+/// Higher-resolution YouTube tiers are video-only and would need an audio
+/// merge (ffmpeg), so they're intentionally omitted here.
+Future<List<YouTubeStreamOption>> listYouTubeStreams(String url) async {
+  final yt = YoutubeExplode();
+  try {
+    final manifest = await yt.videos.streamsClient.getManifest(url);
+    final byLabel = <String, MuxedStreamInfo>{};
+    for (final s in manifest.muxed) {
+      final existing = byLabel[s.qualityLabel];
+      if (existing == null ||
+          s.bitrate.bitsPerSecond > existing.bitrate.bitsPerSecond) {
+        byLabel[s.qualityLabel] = s;
+      }
+    }
+    final out = byLabel.values
+        .map((s) => YouTubeStreamOption(
+            s.qualityLabel, s.url.toString(), s.videoResolution.height))
+        .toList()
+      ..sort((a, b) => (b.height ?? 0).compareTo(a.height ?? 0));
+    return out;
+  } finally {
+    yt.close();
+  }
+}

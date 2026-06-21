@@ -49,6 +49,28 @@ void main() {
     test('does not double up an extension already present', () {
       expect(suggestFileName('clip.mp4', 'https://x.com/v.mp4'), 'clip.mp4');
     });
+
+    test('embeds the app version before the extension', () {
+      expect(
+        suggestFileName('Clip', 'https://x.com/v.mp4', version: '1.0.1'),
+        'Clip_v1.0.1.mp4',
+      );
+    });
+
+    test('embeds quality and version together', () {
+      expect(
+        suggestFileName('Clip', 'https://x.com/v.mp4',
+            version: '1.0.1', quality: '720p'),
+        'Clip_720p_v1.0.1.mp4',
+      );
+    });
+
+    test('keeps a single extension when title already has one', () {
+      expect(
+        suggestFileName('clip.mp4', 'https://x.com/v.mp4', version: '2.0.0'),
+        'clip_v2.0.0.mp4',
+      );
+    });
   });
 
   group('downloadToFile', () {

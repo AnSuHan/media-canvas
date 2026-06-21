@@ -12,5 +12,6 @@
 library;
 
 export 'adaptive_downloader.dart';
+export 'download_option.dart';
 export 'progressive_downloader.dart';
 export 'video_downloader.dart';

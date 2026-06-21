@@ -14,7 +14,9 @@
 - **광고 자동 차단**:
   - *페이지 광고*: 웹뷰/임베드 대신 직접 스트림만 재생하므로 프리롤·오버레이·배너 등 페이지 광고 머신이 아예 로드되지 않음. 광고/트래커 호스트 URL 은 후보에서 제외.
   - *서버 삽입 광고(SSAI)*: HLS 재생목록의 SCTE-35 마커(`#EXT-X-CUE-OUT`/`CUE-IN`, `DATERANGE`)를 읽어 광고 세그먼트를 제거한 재생목록으로 재생 → 광고 구간 자동 스킵, 본편만 이어서 재생.
-- **URL 영상 다운로드**: URL 로 등록한 영상을 **길게 누르면** 저장 위치를 고르고 진행률·취소가 있는 다운로드 시작.
+- **URL 영상 다운로드**: URL 로 등록한 영상을 **길게 누르면** 화질을 고르고 저장 위치를 정해 진행률·취소가 있는 다운로드 시작.
+  - **화질 선택**: 유튜브(muxed 화질), HLS 마스터(variant 해상도), DASH(representation) 의 가용 화질을 목록으로 보여주고 선택. 단일 화질 소스(일반 mp4)는 바로 진행.
+  - **파일명에 화질·앱 버전 표기**: 저장 파일명에 선택한 화질과 앱 버전이 들어갑니다 (예: `제목_720p_v1.0.1.mp4`).
   - *progressive* (mp4/webm 등, 유튜브 포함): 직접 스트리밍 저장.
   - *adaptive* (HLS `.m3u8` / DASH `.mpd`): 세그먼트를 받아 하나로 합쳐 저장(HLS TS→`.ts`, fMP4/DASH→`.mp4`). AES-128 암호화 HLS 는 자동 복호화, SSAI 광고는 제거 후 저장.
 - **설정 화면**: 새 미디어 기본값(볼륨·음소거·반복·재생), 캔버스 배경(점/격자/단색), 그리드 스냅, 동작 옵션.
@@ -87,8 +89,9 @@ lib/
 │   └── download/                   # ⬇ 동영상 다운로드 모듈 (추후 패키지 분리 가능)
 │       ├── download.dart           #   배럴(공개 API) — 이 파일만 import
 │       ├── video_downloader.dart   #   VideoDownloader 파사드(단일 진입점)
+│       ├── download_option.dart    #   DownloadOption(화질 선택 모델)
 │       ├── progressive_downloader.dart  # mp4/webm 등 단일 파일 스트리밍 저장
-│       └── adaptive_downloader.dart     # HLS/DASH 세그먼트 다운로드·복호화·합치기
+│       └── adaptive_downloader.dart     # HLS/DASH 화질 나열·세그먼트 다운로드·복호화·합치기
 └── widgets/
     ├── board_item_widget.dart      # 드래그/리사이즈 가능한 개별 미디어 위젯 (길게눌러 다운로드)
     └── settings_page.dart          # 설정 화면

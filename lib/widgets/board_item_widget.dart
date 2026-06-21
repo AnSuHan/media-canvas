@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/media_item.dart';
 import '../services/board_controller.dart';
@@ -165,21 +166,62 @@ class _BoardItemWidgetState extends State<BoardItemWidget> {
 
     const downloader = VideoDownloader();
 
-    // 1) Resolve to a direct stream / manifest.
-    String url;
+    // App version, embedded into the saved file name (best-effort).
+    var version = '';
     try {
-      url = await controller.resolveDownloadUrl(item);
+      version = (await PackageInfo.fromPlatform()).version;
+    } catch (_) {}
+    if (!mounted) return;
+
+    // 1) List the available qualities (shows a brief loading dialog).
+    List<DownloadOption> options;
+    var listingOpen = true;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 16),
+            Text('화질 정보를 불러오는 중…'),
+          ],
+        ),
+      ),
+    );
+    try {
+      options = await controller.listDownloadOptions(item);
     } catch (_) {
-      toast('다운로드 주소를 가져오지 못했습니다.');
-      return;
+      options = const [];
+    } finally {
+      if (listingOpen && mounted) {
+        listingOpen = false;
+        Navigator.of(context, rootNavigator: true).pop();
+      }
     }
-    if (!downloader.canDownload(url)) {
+    options = options.where((o) => downloader.canDownload(o.url)).toList();
+    if (options.isEmpty) {
       toast('이 주소는 동영상 파일로 저장할 수 없습니다.');
       return;
     }
 
-    // 2) Ask where to save.
-    final suggested = downloader.suggestName(item.title, url);
+    // 2) Pick a quality (skip the picker when there's only one).
+    if (!mounted) return;
+    final option =
+        options.length == 1 ? options.first : await _pickQuality(options);
+    if (option == null) return;
+
+    // 3) Ask where to save — file name carries quality + app version.
+    final suggested = downloader.suggestName(
+      item.title,
+      option.url,
+      version: version,
+      quality: option.label,
+    );
     String? savePath;
     try {
       savePath = await FilePicker.platform.saveFile(
@@ -241,10 +283,11 @@ class _BoardItemWidgetState extends State<BoardItemWidget> {
     final saveTo = savePath;
     var writtenPath = saveTo;
     try {
-      // The facade picks progressive vs. adaptive (HLS/DASH) and normalizes
-      // progress; adaptive streams may return a corrected .ts/.mp4 path.
-      writtenPath = await downloader.download(
-        url,
+      // The facade routes progressive vs. adaptive (HLS/DASH), selects the
+      // chosen quality, and normalizes progress; adaptive streams may return a
+      // corrected .ts/.mp4 path.
+      writtenPath = await downloader.downloadOption(
+        option,
         saveTo,
         client: client,
         onProgress: (fraction) {
@@ -264,6 +307,38 @@ class _BoardItemWidgetState extends State<BoardItemWidget> {
       client.close();
       progress.dispose();
     }
+  }
+
+  /// Shows a quality picker and returns the chosen option (or null if dismissed).
+  Future<DownloadOption?> _pickQuality(List<DownloadOption> options) {
+    return showDialog<DownloadOption>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('화질 선택'),
+        children: [
+          for (final o in options)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, o),
+              child: Row(
+                children: [
+                  const Icon(Icons.high_quality_outlined,
+                      size: 18, color: AppColors.brass),
+                  const SizedBox(width: 10),
+                  Text(o.label),
+                  if (o.adaptive) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      o.url.toLowerCase().contains('.mpd') ? 'DASH' : 'HLS',
+                      style:
+                          const TextStyle(color: AppColors.textDim, fontSize: 11),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _resizeHandle() {
