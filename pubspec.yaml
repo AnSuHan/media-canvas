@@ -1,7 +1,7 @@
 name: media_canvas
 description: "Media Canvas — play multiple videos, images and GIFs at once with independent controls, free placement and layering."
 publish_to: "none"
-version: 1.0.2+3
+version: 1.0.3+4
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -47,6 +47,12 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Bundled yt-dlp binary — lets the app play & download from the ~1800 sites
+  # yt-dlp supports (X/Twitter, TikTok, Facebook, Vimeo, …) without per-site
+  # code. Fetched into assets/bin/ before building (see README / build step).
+  assets:
+    - assets/bin/
 
 # App launcher icon — generated into each platform with:
 #   dart run flutter_launcher_icons

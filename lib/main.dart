@@ -145,15 +145,37 @@ class _BoardPageState extends State<BoardPage> {
         await _addInstagramPost(url, compact);
         return;
       }
-      // A YouTube link is always a video, whatever the segmented button says.
+
+      // Auto-detect what the link actually is (video / image / gif) so any URL
+      // — a direct .mp4, an HLS/DASH stream, an image, or a web page with one
+      // embedded clip — is routed to the right surface instead of being forced
+      // into the video engine (which would error with "unsupported format").
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.showSnackBar(const SnackBar(
+        content: Text('링크 확인 중…'),
+        duration: Duration(seconds: 13),
+      ));
+      ResolvedMedia? resolved;
+      try {
+        resolved = await resolveMedia(url);
+      } catch (_) {}
+      messenger.hideCurrentSnackBar();
+
+      // Fall back to the user's manual Video/Image/GIF choice if we couldn't
+      // classify the link. For a video, keep the original page URL as the
+      // source so playback re-resolves and downloads/quality listing still
+      // work; for an image, use the resolved direct image URL so it renders.
       final youtube = isYouTubeUrl(url);
-      final resolvedKind = youtube ? MediaKind.video : kind;
+      final resolvedKind = youtube ? MediaKind.video : (resolved?.kind ?? kind);
+      final source =
+          resolvedKind == MediaKind.video ? url : (resolved?.url ?? url);
       final w = compact ? 200.0 : 360.0;
       await controller.addItem(MediaItem(
         id: _newId(),
         kind: resolvedKind,
         sourceKind: SourceKind.network,
-        source: url,
+        source: source,
         title: youtube
             ? 'YouTube'
             : (resolvedKind == MediaKind.video ? 'Video' : 'URL ${resolvedKind.name}'),

@@ -1,5 +1,7 @@
 import 'package:http/http.dart' as http;
 
+import '../models/media_item.dart' show MediaKind;
+import 'ytdlp.dart';
 import 'youtube_resolver.dart';
 
 // Re-export so callers that only need the YouTube check can import this one file.
@@ -30,6 +32,20 @@ const _mediaExtensions = {
   'mp4', 'm4v', 'webm', 'mkv', 'mov', 'avi', 'flv', 'ts', 'ogv', 'mpg', 'mpeg',
   'm3u8', // HLS playlist
   'mpd', // DASH manifest
+};
+
+/// File extensions we treat as a still image (rendered as an image, not fed to
+/// the video engine). `gif` is handled separately so it maps to [MediaKind.gif].
+const _imageExtensions = {
+  'jpg', 'jpeg', 'png', 'webp', 'bmp', 'svg', 'avif', 'heic', 'heif', 'tiff',
+};
+
+/// Browser-like headers so pages serve their real markup / the right media.
+const _browserHeaders = {
+  'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 };
 
 /// Substrings that mark a URL as an ad / tracker / analytics asset. Any
@@ -83,9 +99,144 @@ Future<String> resolvePlayableUrl(String original) async {
     final extracted = await extractVideoFromPage(url);
     if (extracted != null) return extracted;
   } catch (_) {
-    // Fall through to the raw URL.
+    // Fall through to yt-dlp / the raw URL.
   }
+
+  // The built-in scraper found nothing — most likely a JS-driven site (X,
+  // TikTok, Facebook, Vimeo, …). Let the bundled yt-dlp extract the direct
+  // stream; it supports ~1800 sites. No-op when yt-dlp isn't bundled (tests).
+  final viaYtDlp = await ytDlpResolveStream(url);
+  if (viaYtDlp != null) return viaYtDlp;
+
   return url;
+}
+
+/// The classified result of a pasted link: the URL to hand the engine plus how
+/// it should be rendered (video / image / gif). [forVideoSource] is the URL to
+/// store on a *video* item — always the original page link, so re-resolution
+/// and quality/download listing keep working; for images it's the direct image
+/// URL so it renders immediately.
+class ResolvedMedia {
+  const ResolvedMedia(this.url, this.kind);
+  final String url;
+  final MediaKind kind;
+}
+
+/// Classifies [original] into the media kind the app should render, so an
+/// arbitrary pasted link "just works" instead of being forced into the video
+/// engine (which would fail with a cryptic "unsupported format" on an image or
+/// a plain web page).
+///
+/// Detection order:
+///   1. YouTube  → video (resolved lazily at playback time).
+///   2. Direct file by extension → image / gif / video.
+///   3. Otherwise fetch the link and classify by `Content-Type` (the server may
+///      return an image or a stream directly) or, for an HTML page, by whether
+///      it embeds a video; failing that, fall back to the page's preview image
+///      so *something* shows.
+///
+/// Returns null when the link can't be classified, so the caller can honor the
+/// user's manual Video/Image/GIF choice as a last resort.
+///
+/// [client] is injectable for tests; production passes none and a one-shot
+/// client is used per page fetch.
+Future<ResolvedMedia?> resolveMedia(String original, {http.Client? client}) async {
+  final url = original.trim();
+  if (url.isEmpty) return null;
+
+  // YouTube is always a video; keep the original watch URL as the source so the
+  // player/downloader can re-resolve and list qualities later.
+  if (isYouTubeUrl(url)) return ResolvedMedia(url, MediaKind.video);
+
+  final ext = _extensionOf(url);
+  if (ext != null) {
+    if (ext == 'gif') return ResolvedMedia(url, MediaKind.gif);
+    if (_imageExtensions.contains(ext)) return ResolvedMedia(url, MediaKind.image);
+    if (_mediaExtensions.contains(ext)) return ResolvedMedia(url, MediaKind.video);
+  }
+
+  try {
+    return await _classifyPage(url, client: client);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Fetches [url] once and classifies it: a direct image/video by `Content-Type`,
+/// an HTML page that embeds a video, or an HTML page whose preview image we can
+/// show. Returns null if nothing usable is found.
+Future<ResolvedMedia?> _classifyPage(String url, {http.Client? client}) async {
+  final ownClient = client == null;
+  final c = client ?? http.Client();
+  try {
+    final resp = await c
+        .get(Uri.parse(url), headers: _browserHeaders)
+        .timeout(const Duration(seconds: 12));
+    final ct = (resp.headers['content-type'] ?? '').toLowerCase();
+
+    // The server handed us a raw stream, not a page.
+    if (ct.startsWith('image/')) {
+      return ResolvedMedia(url, ct.contains('gif') ? MediaKind.gif : MediaKind.image);
+    }
+    if (ct.startsWith('video/') ||
+        ct.contains('mpegurl') ||
+        ct.contains('dash+xml')) {
+      return ResolvedMedia(url, MediaKind.video);
+    }
+    if (resp.statusCode != 200 || !ct.contains('text/html')) return null;
+
+    final base = Uri.parse(url);
+    // A real video embedded in the page → keep the page URL as a video source so
+    // playback re-resolves (and strips ads) through resolvePlayableUrl.
+    if (_extractCandidates(resp.body, base: base).isNotEmpty ||
+        _firstEmbedPage(resp.body, base: base) != null) {
+      return ResolvedMedia(url, MediaKind.video);
+    }
+    // The stream may be hidden behind JavaScript (X, TikTok, Facebook, …). Ask
+    // the bundled yt-dlp — if it can extract a stream, it's a video. (No-op
+    // when yt-dlp isn't bundled, e.g. in tests.)
+    if (await ytDlpResolveStream(url) != null) {
+      return ResolvedMedia(url, MediaKind.video);
+    }
+    // No video anywhere — show its preview image so the tile isn't an error.
+    final image = _firstMetaContent(
+      resp.body,
+      const ['og:image:secure_url', 'og:image', 'twitter:image'],
+      base: base,
+    );
+    if (image != null) {
+      final imgExt = _extensionOf(image);
+      return ResolvedMedia(image, imgExt == 'gif' ? MediaKind.gif : MediaKind.image);
+    }
+    return null;
+  } finally {
+    if (ownClient) c.close();
+  }
+}
+
+/// Returns the absolute `content` of the first matching `<meta>` tag whose
+/// property/name is one of [props], or null. Handles either attribute order.
+String? _firstMetaContent(String html, List<String> props, {required Uri base}) {
+  for (final prop in props) {
+    final p = RegExp.escape(prop);
+    for (final re in [
+      RegExp(
+        '<meta[^>]*?(?:property|name)\\s*=\\s*["\']$p["\'][^>]*?content\\s*=\\s*["\']([^"\']+)["\']',
+        caseSensitive: false,
+      ),
+      RegExp(
+        '<meta[^>]*?content\\s*=\\s*["\']([^"\']+)["\'][^>]*?(?:property|name)\\s*=\\s*["\']$p["\']',
+        caseSensitive: false,
+      ),
+    ]) {
+      final m = re.firstMatch(html);
+      if (m != null) {
+        final resolved = _resolveAgainst(base, _unescape(m.group(1)!.trim()));
+        if (resolved != null) return resolved;
+      }
+    }
+  }
+  return null;
 }
 
 /// True if [url]'s path ends in a known media extension (query string ignored),
@@ -133,16 +284,7 @@ Future<String?> extractVideoFromPage(
   final ownClient = client == null;
   final c = client ?? http.Client();
   try {
-    final resp = await c.get(
-      Uri.parse(pageUrl),
-      headers: const {
-        // Look like a normal browser so pages serve their real markup.
-        'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                '(KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-    );
+    final resp = await c.get(Uri.parse(pageUrl), headers: _browserHeaders);
     final contentType = resp.headers['content-type'] ?? '';
     // The link was actually a stream (server-decided), not a page.
     if (contentType.startsWith('video/') ||

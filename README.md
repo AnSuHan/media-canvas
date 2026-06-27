@@ -10,16 +10,21 @@
 - **자유 배치**: 드래그로 이동, 우하단 핸들로 크기 조정, 회전·투명도 슬라이더.
 - **Stack 레이어(depth)**: 맨 앞으로 / 앞으로 / 뒤로 / 맨 뒤로 — 비디오·이미지·GIF 를 겹쳐 배치.
 - **이미지 · GIF**: 로컬 파일과 URL 모두 지원 (GIF 자동 재생).
-- **모든 동영상 링크 지원**: 유튜브뿐 아니라 임의의 동영상 페이지/링크. URL 을 넣으면 페이지 HTML 에서 동영상 스트림을 추출해 재생 — 페이지에 동영상이 하나면 그것을 자동으로 재생. (`<video>`/`<source>`, OG/Twitter 메타, JSON-LD, 인라인 스크립트의 m3u8/mp4, iframe 플레이어 1단계 추적)
+- **어떤 URL 이든 동작 (자동 종류 판별)**: URL 을 넣으면 그 링크가 실제로 **영상/이미지/GIF** 중 무엇인지 자동으로 판별해 알맞은 화면으로 띄웁니다 — 확장자, 서버의 `Content-Type`, 페이지 스크래핑으로 결정. 이미지/일반 페이지를 영상 엔진에 잘못 넘겨 "unsupported format" 이 뜨던 문제 제거. 영상이 없는 페이지는 미리보기 이미지(og:image)로 폴백, 실패해도 거친 엔진 오류 대신 친근한 한국어 안내를 표시.
+- **모든 동영상 링크 지원 (yt-dlp 내장)**: 유튜브·직접 링크(mp4/webm…)·HLS/DASH 스트림은 물론, **인터넷에 배포된 사실상 모든 동영상 링크**를 재생·다운로드합니다.
+  - *빌트인 추출*: 페이지 HTML 에서 스트림 직접 추출 (`<video>`/`<source>`, OG/Twitter 메타, JSON-LD, 인라인 m3u8/mp4, iframe 플레이어 1단계). 자바스크립트가 필요 없는 일반 사이트는 이 빠른 경로로 처리.
+  - *yt-dlp 폴백*: 빌트인이 닿지 못하는 자바스크립트 기반 사이트(X/트위터, TikTok, 페이스북, Vimeo, 트위치 VOD 등 **약 1800개 사이트**)는 번들된 **yt-dlp** 로 직접 스트림을 추출해 재생·다운로드. 사이트별 코드를 따로 두지 않고 yt-dlp 가 지원하는 범위를 그대로 사용하므로, yt-dlp 만 갱신하면 지원 사이트가 자동으로 넓어집니다. *(Windows 전용 — Android 는 빌트인 추출까지 동작)*
 - **Instagram 게시물 전체 펼치기**: 인스타그램 게시물/릴스 링크를 넣으면 그 게시물의 **모든 사진·영상(캐러셀 포함)** 을 한 번에 보드에 올립니다. (공개 게시물 대상, 비공개/로그인 필요 게시물은 불러올 수 없을 수 있음)
 - **광고 자동 차단**:
   - *페이지 광고*: 웹뷰/임베드 대신 직접 스트림만 재생하므로 프리롤·오버레이·배너 등 페이지 광고 머신이 아예 로드되지 않음. 광고/트래커 호스트 URL 은 후보에서 제외.
   - *서버 삽입 광고(SSAI)*: HLS 재생목록의 SCTE-35 마커(`#EXT-X-CUE-OUT`/`CUE-IN`, `DATERANGE`)를 읽어 광고 세그먼트를 제거한 재생목록으로 재생 → 광고 구간 자동 스킵, 본편만 이어서 재생.
+  - *yt-dlp 경유 링크*: yt-dlp 는 광고 크리에이티브가 아니라 **본편 콘텐츠 스트림**을 추출하므로, 플레이어가 끼워 넣는 프리롤/오버레이 광고는 애초에 들어오지 않습니다(앱의 "직접 스트림 = 광고 차단" 원칙과 동일). 단, 영상 내부에 박힌 스폰서 구간 제거(SponsorBlock)는 ffmpeg 가 필요해 기본 비활성화입니다.
 - **URL 영상 다운로드**: URL 로 등록한 영상을 **길게 누르면** 화질을 고르고 저장 위치를 정해 진행률·취소가 있는 다운로드 시작.
   - **화질 선택**: 유튜브(muxed 화질), HLS 마스터(variant 해상도), DASH(representation) 의 가용 화질을 목록으로 보여주고 선택. 단일 화질 소스(일반 mp4)는 바로 진행.
   - **파일명에 화질·앱 버전 표기**: 저장 파일명에 선택한 화질과 앱 버전이 들어갑니다 (예: `제목_720p_v1.0.1.mp4`).
   - *progressive* (mp4/webm 등, 유튜브 포함): 직접 스트리밍 저장.
   - *adaptive* (HLS `.m3u8` / DASH `.mpd`): 세그먼트를 받아 하나로 합쳐 저장(HLS TS→`.ts`, fMP4/DASH→`.mp4`). AES-128 암호화 HLS 는 자동 복호화, SSAI 광고는 제거 후 저장.
+  - *yt-dlp 지원 사이트* (X/TikTok/Vimeo 등): 번들된 yt-dlp 가 가용 화질을 나열하고 다운로드를 수행(취소 시 프로세스 종료). ffmpeg 없이 받을 수 있도록 **단일 파일(muxed) 포맷**을 우선 선택.
 - **설정 화면**: 새 미디어 기본값(볼륨·음소거·반복·재생), 캔버스 배경(점/격자/단색), 그리드 스냅, 동작 옵션.
 - **파일 추출/가져오기**:
   - 보드를 `.board.json` 파일로 내보내기 → 다른 기기에서 다시 열기.
@@ -32,11 +37,26 @@
 ```bash
 flutter --version          # 3.3 이상 확인
 flutter pub get
+pwsh tool/fetch_ytdlp.ps1  # (Windows) yt-dlp.exe 를 assets/bin/ 으로 받기 — 번들용
 flutter run -d windows     # 윈도우
 flutter run -d <device-id> # 안드로이드 (flutter devices 로 id 확인)
 ```
 
 > 첫 빌드 시 `media_kit_libs_video` 가 libmpv 바이너리를 자동으로 받아옵니다. 별도 시스템 설치 불필요.
+>
+> **yt-dlp 번들**: `assets/bin/yt-dlp.exe` 는 용량(약 18MB) 때문에 git 에 포함하지 않습니다. Windows 빌드 전에 `tool/fetch_ytdlp.ps1` 로 한 번 받아 두면, 빌드 시 앱 에셋으로 함께 패키징되어 앱 옆 경로에서 자동 실행됩니다. 받지 않아도 빌드는 되며, 이 경우 yt-dlp 폴백만 비활성화되고 빌트인 추출은 그대로 동작합니다.
+
+### 릴리스용 단일 exe 만들기 (Windows)
+
+배포 자산으로 **단일 실행 파일**(`MediaCanvas-v<버전>.exe`)을 만듭니다. 사용자는 이 파일 하나만 받아 더블클릭하면, 임시 폴더에 풀린 뒤 앱이 바로 실행됩니다(설치·압축 해제 불필요). 7-Zip SFX 방식이라 7-Zip 설치가 필요합니다.
+
+```powershell
+pwsh tool/fetch_ytdlp.ps1            # yt-dlp.exe 받아 번들 준비
+flutter build windows --release      # 앱 빌드
+pwsh tool/package_windows.ps1        # → release_assets/MediaCanvas-v<버전>.exe
+```
+
+`package_windows.ps1` 은 pubspec 의 버전을 읽어 Release 폴더를 SFX exe 로 묶고, 무결성·루트의 `media_canvas.exe` 존재를 검증합니다. 버전을 직접 지정하려면 `-Version 1.0.3` 처럼 넘깁니다.
 
 ## 플랫폼 설정
 
@@ -59,7 +79,8 @@ flutter run -d <device-id> # 안드로이드 (flutter devices 로 id 확인)
 - 비디오 개수가 많아지면 기기의 하드웨어 디코더 한계(보통 5~16개)에 따라 끊길 수 있습니다.
 - PNG 합성 시 영상은 "현재 프레임"이 캡처됩니다. 재생 중이라면 캡처 시점의 화면이 담깁니다.
 - 다운로드 한계: DASH 에서 오디오·비디오가 **별도 트랙**으로 분리된 경우 ffmpeg 없이 한 컨테이너로 합칠 수 없어, 최고 화질 **비디오 트랙만**(무음) 저장됩니다. 매니페스트를 계속 갱신하는 라이브 SSAI 는 한 번의 재작성으로 추적하지 않습니다.
-- 이 환경에서는 Flutter 컴파일·실행을 할 수 없어 빌드 검증은 못 했습니다. 처음 `flutter run` 시 패키지 버전 충돌이 나면 `flutter pub upgrade` 로 맞추세요.
+- yt-dlp 경유 다운로드도 같은 이유로 **단일 파일(muxed) 포맷**을 우선합니다. 따라서 일부 사이트의 4K 처럼 영상·음성이 분리만 제공되는 최상위 화질은 (ffmpeg 미번들로) 받지 못하고, 음성이 포함된 가장 높은 단일 화질을 받습니다.
+- yt-dlp 폴백은 **Windows 전용**입니다(Windows 바이너리만 번들). Android 는 빌트인 추출까지 동작합니다.
 
 ## 파일 추출/가져오기 (네이티브 저장 대화상자)
 
@@ -85,7 +106,8 @@ lib/
 │   ├── board_controller.dart       # 상태·플레이어·z-order·전역제어·설정·wakelock
 │   ├── board_exporter.dart         # PNG 합성 (영상 프레임 포함)
 │   ├── layout_store.dart           # 저장/불러오기 + 파일 추출/가져오기 + 설정 영속화
-│   ├── media_url_resolver.dart     # 임의 URL → 직접 스트림 추출 (+ 페이지 광고 차단)
+│   ├── media_url_resolver.dart     # 임의 URL → 종류 판별 + 직접 스트림 추출 (+ 페이지 광고 차단, yt-dlp 폴백)
+│   ├── ytdlp.dart                  # 번들 yt-dlp 구동: 스트림 추출·화질 나열·다운로드 (1800+ 사이트)
 │   ├── instagram_resolver.dart     # 인스타 게시물 → 모든 사진·영상 추출
 │   ├── hls_ad_filter.dart          # HLS SSAI 광고 세그먼트 제거 (재생·다운로드 공용)
 │   └── download/                   # ⬇ 동영상 다운로드 모듈 (추후 패키지 분리 가능)

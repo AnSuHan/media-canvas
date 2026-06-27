@@ -2,7 +2,7 @@
 // genuinely playable stream for real-world links. Skipped by default (needs
 // internet + remote services up). Run explicitly with:
 //
-//   flutter test test/live_network_test.dart --dart-define=LIVE=1
+//   flutter test test/live_network_test.dart --dart-define=LIVE=true
 //
 // It (1) resolves a real link to a direct stream URL via the same code path the
 // app uses, then (2) actually fetches the first bytes of that stream to confirm
@@ -56,7 +56,7 @@ void main() {
     await _expectStreamsVideo(stream);
     // ignore: avoid_print
     print('YouTube resolved → ${stream.substring(0, 60)}…');
-  }, skip: _live ? false : 'live network test (pass --dart-define=LIVE=1)');
+  }, skip: _live ? false : 'live network test (pass --dart-define=LIVE=true)');
 
   test('passes a real direct .mp4 through and it streams', () async {
     // A long-standing public sample clip that supports range requests.
@@ -65,7 +65,7 @@ void main() {
 
     expect(stream, mp4, reason: 'a direct mp4 needs no resolution');
     await _expectStreamsVideo(stream);
-  }, skip: _live ? false : 'live network test (pass --dart-define=LIVE=1)');
+  }, skip: _live ? false : 'live network test (pass --dart-define=LIVE=true)');
 
   test('runs the HLS ad pipeline on a real master playlist', () async {
     // A real multi-bitrate HLS master. It carries no SSAI ad markers, so the
@@ -86,7 +86,7 @@ void main() {
     expect(filtered, isNull);
     // ignore: avoid_print
     print('HLS variant selected → $variant');
-  }, skip: _live ? false : 'live network test (pass --dart-define=LIVE=1)');
+  }, skip: _live ? false : 'live network test (pass --dart-define=LIVE=true)');
 
   test('downloads a real video to a file', () async {
     const mp4 = 'https://www.w3schools.com/html/mov_bbb.mp4';
@@ -110,7 +110,7 @@ void main() {
     // ignore: avoid_print
     print('downloaded ${file.lengthSync()} bytes → $out');
     tmp.deleteSync(recursive: true);
-  }, skip: _live ? false : 'live network test (pass --dart-define=LIVE=1)');
+  }, skip: _live ? false : 'live network test (pass --dart-define=LIVE=true)');
 
   test('parses a real HLS playlist and fetches real TS segments', () async {
     // Real master → our variant pick → real media playlist → real segments.
@@ -132,5 +132,5 @@ void main() {
     }
     // ignore: avoid_print
     print('HLS: ${plan.segments.length} real segments, TS verified');
-  }, skip: _live ? false : 'live network test (pass --dart-define=LIVE=1)');
+  }, skip: _live ? false : 'live network test (pass --dart-define=LIVE=true)');
 }

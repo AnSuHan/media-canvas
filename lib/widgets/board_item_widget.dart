@@ -10,6 +10,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../models/media_item.dart';
 import '../services/board_controller.dart';
 import '../services/download/download.dart';
+import '../services/ytdlp.dart';
 import '../theme.dart';
 
 /// One placeable item on the board. Renders the media, lets the user drag it
@@ -203,7 +204,8 @@ class _BoardItemWidgetState extends State<BoardItemWidget> {
         Navigator.of(context, rootNavigator: true).pop();
       }
     }
-    options = options.where((o) => downloader.canDownload(o.url)).toList();
+    options =
+        options.where((o) => o.isYtDlp || downloader.canDownload(o.url)).toList();
     if (options.isEmpty) {
       toast('이 주소는 동영상 파일로 저장할 수 없습니다.');
       return;
@@ -240,6 +242,7 @@ class _BoardItemWidgetState extends State<BoardItemWidget> {
     //    the in-flight stream so "취소" really stops the transfer.
     final progress = ValueNotifier<double>(0);
     final client = http.Client();
+    Process? ytProc; // set when the chosen option downloads via yt-dlp
     var cancelled = false;
     var dialogOpen = true;
 
@@ -271,7 +274,8 @@ class _BoardItemWidgetState extends State<BoardItemWidget> {
             onPressed: () {
               cancelled = true;
               dialogOpen = false;
-              client.close(); // aborts the stream
+              client.close(); // aborts an http stream
+              ytProc?.kill(); // aborts a yt-dlp download
               Navigator.of(ctx).pop();
             },
             child: const Text('취소'),
@@ -283,17 +287,30 @@ class _BoardItemWidgetState extends State<BoardItemWidget> {
     final saveTo = savePath;
     var writtenPath = saveTo;
     try {
-      // The facade routes progressive vs. adaptive (HLS/DASH), selects the
-      // chosen quality, and normalizes progress; adaptive streams may return a
-      // corrected .ts/.mp4 path.
-      writtenPath = await downloader.downloadOption(
-        option,
-        saveTo,
-        client: client,
-        onProgress: (fraction) {
-          if (fraction != null) progress.value = fraction;
-        },
-      );
+      if (option.isYtDlp) {
+        // A yt-dlp-supported site (X/TikTok/…): yt-dlp fetches the file itself.
+        writtenPath = await ytDlpDownload(
+          option.ytdlpUrl!,
+          saveTo,
+          format: option.ytdlpFormat,
+          onStart: (proc) => ytProc = proc,
+          onProgress: (fraction) {
+            if (fraction != null) progress.value = fraction;
+          },
+        );
+      } else {
+        // The facade routes progressive vs. adaptive (HLS/DASH), selects the
+        // chosen quality, and normalizes progress; adaptive streams may return
+        // a corrected .ts/.mp4 path.
+        writtenPath = await downloader.downloadOption(
+          option,
+          saveTo,
+          client: client,
+          onProgress: (fraction) {
+            if (fraction != null) progress.value = fraction;
+          },
+        );
+      }
       closeDialog();
       toast('저장 완료: $writtenPath');
     } catch (e) {

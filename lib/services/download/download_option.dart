@@ -12,6 +12,8 @@ class DownloadOption {
     this.height,
     this.bandwidth,
     this.dashBandwidth,
+    this.ytdlpUrl,
+    this.ytdlpFormat,
   });
 
   /// What the picker shows, e.g. `720p` or `1200 kbps`.
@@ -34,4 +36,13 @@ class DownloadOption {
   /// For DASH only: the bandwidth of the representation to download, so the
   /// manifest parser can pick exactly this quality instead of the best.
   final int? dashBandwidth;
+
+  /// When set, this option is downloaded by **yt-dlp** (not the http path):
+  /// [ytdlpUrl] is the original page URL and [ytdlpFormat] the yt-dlp format
+  /// selector/id. Used for sites the built-in extractor can't reach.
+  final String? ytdlpUrl;
+  final String? ytdlpFormat;
+
+  /// True if this option must be fetched via yt-dlp.
+  bool get isYtDlp => ytdlpUrl != null;
 }

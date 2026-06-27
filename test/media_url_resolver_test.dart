@@ -6,7 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'package:media_canvas/models/media_item.dart' show MediaKind;
 import 'package:media_canvas/services/media_url_resolver.dart';
+import 'package:media_canvas/services/ytdlp.dart';
 
 http.Client _html(String body, {String contentType = 'text/html'}) {
   return MockClient((req) async => http.Response(
@@ -171,6 +173,172 @@ void main() {
         client: client,
       );
       expect(got, 'https://example.com/streamendpoint');
+    });
+  });
+
+  // resolveMedia classifies a pasted link into the kind the app should render,
+  // so any URL is routed correctly instead of being forced into the video
+  // engine (which would error with "unsupported format"). These cover the
+  // offline branches that decide before any network fetch.
+  group('resolveMedia — extension/type classification', () {
+    Future<MediaKind?> kindOf(String url) async => (await resolveMedia(url))?.kind;
+
+    test('a YouTube link is a video (original URL kept as source)', () async {
+      final r = await resolveMedia('https://youtu.be/abc123');
+      expect(r?.kind, MediaKind.video);
+      expect(r?.url, 'https://youtu.be/abc123');
+    });
+
+    test('a direct .mp4 is a video', () async {
+      expect(await kindOf('https://cdn.example.com/clip.mp4'), MediaKind.video);
+    });
+
+    test('an HLS .m3u8 stream is a video', () async {
+      expect(await kindOf('https://cdn.example.com/live/stream.m3u8'),
+          MediaKind.video);
+    });
+
+    test('a DASH .mpd stream is a video', () async {
+      expect(await kindOf('https://cdn.example.com/v/manifest.mpd'),
+          MediaKind.video);
+    });
+
+    test('a .jpg/.png link is an image', () async {
+      expect(await kindOf('https://img.example.com/a.jpg'), MediaKind.image);
+      expect(await kindOf('https://img.example.com/a.png'), MediaKind.image);
+    });
+
+    test('a .gif link is a gif', () async {
+      expect(await kindOf('https://img.example.com/loop.gif'), MediaKind.gif);
+    });
+
+    test('empty input is unclassified (null)', () async {
+      expect(await resolveMedia('   '), isNull);
+    });
+  });
+
+  // The page-classification path (no usable extension) decides by the server's
+  // Content-Type or by scraping the HTML. A mocked client keeps it offline and
+  // deterministic. This is what stops an image or a plain web page from being
+  // forced into the video engine ("unsupported format").
+  group('resolveMedia — page classification (offline)', () {
+    http.Client serving(String body, String contentType, {int status = 200}) {
+      return MockClient((req) async =>
+          http.Response(body, status, headers: {'content-type': contentType}));
+    }
+
+    test('a server-served image stream → image', () async {
+      final r = await resolveMedia('https://x.example/photo',
+          client: serving('bytes', 'image/jpeg'));
+      expect(r?.kind, MediaKind.image);
+      expect(r?.url, 'https://x.example/photo');
+    });
+
+    test('a server-served gif → gif', () async {
+      final r = await resolveMedia('https://x.example/anim',
+          client: serving('bytes', 'image/gif'));
+      expect(r?.kind, MediaKind.gif);
+    });
+
+    test('a server-served video stream → video', () async {
+      final r = await resolveMedia('https://x.example/streamendpoint',
+          client: serving('bytes', 'video/mp4'));
+      expect(r?.kind, MediaKind.video);
+    });
+
+    test('an HLS endpoint with no extension → video (by content-type)', () async {
+      final r = await resolveMedia('https://x.example/live?token=abc',
+          client: serving('#EXTM3U', 'application/vnd.apple.mpegurl'));
+      expect(r?.kind, MediaKind.video);
+    });
+
+    test('an HTML page that embeds a video → video', () async {
+      const html =
+          '<html><body><video src="https://cdn.example/clip.mp4"></video></body></html>';
+      final r = await resolveMedia('https://news.example/article',
+          client: serving(html, 'text/html'));
+      expect(r?.kind, MediaKind.video);
+      // The source stays the page URL so playback re-resolves (and strips ads).
+      expect(r?.url, 'https://news.example/article');
+    });
+
+    test('an HTML page with no video falls back to its og:image → image',
+        () async {
+      const html = '<html><head>'
+          '<meta property="og:image" content="https://cdn.example/preview.jpg">'
+          '</head><body><p>An article, no video.</p></body></html>';
+      final r = await resolveMedia('https://blog.example/post',
+          client: serving(html, 'text/html'));
+      expect(r?.kind, MediaKind.image);
+      expect(r?.url, 'https://cdn.example/preview.jpg');
+    });
+
+    test('an HTML page with neither video nor preview image → null', () async {
+      const html = '<html><body><p>Just words.</p></body></html>';
+      final r = await resolveMedia('https://blog.example/empty',
+          client: serving(html, 'text/html'));
+      expect(r, isNull);
+    });
+
+    test('a non-200 response → null (caller honors the manual kind)', () async {
+      final r = await resolveMedia('https://x.example/gone',
+          client: serving('nope', 'text/html', status: 404));
+      expect(r, isNull);
+    });
+  });
+
+  // yt-dlp is only a *fallback* for sites the built-in extractor can't reach
+  // (JS-driven players). Ordinary, non-JS links — a direct file, or a plain
+  // HTML page with an embedded <video> / OpenGraph tags — must still classify
+  // correctly with yt-dlp completely unavailable. These pin that guarantee by
+  // forcing yt-dlp off.
+  group('resolveMedia — non-JS links work without yt-dlp', () {
+    setUp(() => setYtDlpExecutable(null)); // ensure the binary is unavailable
+    tearDown(() => setYtDlpExecutable(null));
+
+    http.Client serving(String body, String contentType, {int status = 200}) {
+      return MockClient((req) async =>
+          http.Response(body, status, headers: {'content-type': contentType}));
+    }
+
+    test('yt-dlp is reported unavailable in this configuration', () {
+      expect(ytDlpAvailable(), isFalse);
+    });
+
+    test('a direct .mp4 → video (no network, no yt-dlp)', () async {
+      expect((await resolveMedia('https://cdn.example/clip.mp4'))?.kind,
+          MediaKind.video);
+    });
+
+    test('a non-JS page with an embedded <video> → video (built-in scrape)',
+        () async {
+      const html = '<html><body>'
+          '<video><source src="https://cdn.example/v.mp4"></video>'
+          '</body></html>';
+      final r = await resolveMedia('https://site.example/watch',
+          client: serving(html, 'text/html'));
+      expect(r?.kind, MediaKind.video);
+      expect(r?.url, 'https://site.example/watch');
+    });
+
+    test('a non-JS page exposing og:video → video (built-in scrape)', () async {
+      const html = '<html><head>'
+          '<meta property="og:video" content="https://cdn.example/og.mp4">'
+          '</head><body>article</body></html>';
+      final r = await resolveMedia('https://news.example/story',
+          client: serving(html, 'text/html'));
+      expect(r?.kind, MediaKind.video);
+    });
+
+    test('a non-JS page with only a preview image → image (graceful fallback)',
+        () async {
+      const html = '<html><head>'
+          '<meta property="og:image" content="https://cdn.example/p.jpg">'
+          '</head><body>no video here</body></html>';
+      final r = await resolveMedia('https://blog.example/post',
+          client: serving(html, 'text/html'));
+      expect(r?.kind, MediaKind.image);
+      expect(r?.url, 'https://cdn.example/p.jpg');
     });
   });
 }

@@ -11,6 +11,7 @@ import 'download/download.dart';
 import 'hls_ad_filter.dart';
 import 'instagram_resolver.dart';
 import 'media_url_resolver.dart';
+import 'ytdlp.dart';
 import 'youtube_resolver.dart' show listYouTubeStreams;
 
 /// Bundles a video item's [Player] and [VideoController] together so the UI
@@ -136,9 +137,10 @@ class BoardController extends ChangeNotifier {
     _players[item.id] = bundle;
 
     // Surface engine errors (bad URL, missing/corrupt file) to the UI instead
-    // of spinning forever.
+    // of spinning forever — but as a friendly message, never the raw libmpv
+    // "Failed to recognize file format" string.
     player.stream.error.listen((e) {
-      bundle.error = e;
+      bundle.error = _friendlyError(e);
       notifyListeners();
     });
 
@@ -150,9 +152,34 @@ class BoardController extends ChangeNotifier {
       );
       await player.setVolume(item.muted ? 0 : item.volume);
     } catch (e) {
-      bundle.error = e.toString();
+      bundle.error = _friendlyError(e);
       notifyListeners();
     }
+  }
+
+  /// Turns a raw engine/IO error into a short, user-readable Korean message so
+  /// the board never shows libmpv's cryptic "unsupported format" text.
+  static String _friendlyError(Object raw) {
+    final s = raw.toString().toLowerCase();
+    if (s.contains('format') ||
+        s.contains('recognize') ||
+        s.contains('demux') ||
+        s.contains('no stream') ||
+        s.contains('no video') ||
+        s.contains('codec') ||
+        s.contains('failed to open')) {
+      return '이 링크에서 재생할 수 있는 영상을 찾지 못했어요.';
+    }
+    if (s.contains('404') || s.contains('not found') || s.contains('no such')) {
+      return '링크를 찾을 수 없어요. 주소를 확인해 주세요.';
+    }
+    if (s.contains('network') ||
+        s.contains('timed out') ||
+        s.contains('timeout') ||
+        s.contains('connection')) {
+      return '네트워크 문제로 불러오지 못했어요. 잠시 후 다시 시도해 주세요.';
+    }
+    return '영상을 불러오지 못했어요.';
   }
 
   /// Turns an item's stored source into a URL the engine can actually open.
@@ -200,9 +227,19 @@ class BoardController extends ChangeNotifier {
     final url = await resolvePlayableUrl(src);
     if (isAdaptiveStream(url)) {
       final qualities = await listAdaptiveQualities(url);
-      if (qualities.isNotEmpty) return qualities;
+      return qualities.isNotEmpty
+          ? qualities
+          : [DownloadOption(label: '원본', url: url, adaptive: true)];
     }
-    return [DownloadOption(label: '원본', url: url, adaptive: isAdaptiveStream(url))];
+    if (isDownloadableStream(url)) {
+      return [DownloadOption(label: '원본', url: url, adaptive: false)];
+    }
+    // The built-in http path can't fetch this (a JS-driven page like X/TikTok).
+    // Let the bundled yt-dlp enumerate qualities and perform the download.
+    final viaYtDlp = await ytDlpListOptions(src);
+    if (viaYtDlp.isNotEmpty) return viaYtDlp;
+    // Last resort: hand the resolved URL to the http path anyway.
+    return [DownloadOption(label: '원본', url: url, adaptive: false)];
   }
 
   /// media_kit's [Media] wants a URI for local files. A raw Windows path

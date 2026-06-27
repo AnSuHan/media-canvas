@@ -46,3 +46,7 @@ app.*.map.json
 
 # Packaged release artifacts (uploaded to GitHub Releases, not version control)
 /release_assets/
+
+# Bundled third-party binary (fetched before build, not version-controlled).
+# Get it with: tool/fetch_ytdlp.* (downloads the latest yt-dlp.exe).
+/assets/bin/
