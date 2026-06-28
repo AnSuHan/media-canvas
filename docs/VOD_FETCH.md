@@ -78,6 +78,23 @@ probe** 를 보내 `403`(또는 Cloudflare 챌린지)이면 위장 경로로 라
 이면 기존 빠른 경로를 그대로 쓴다. **YouTube** 는 절대 이 방식으로 막히지 않으므로
 probe 를 건너뛴다(공통 케이스 성능 보존).
 
+### 재생 신뢰성 — 프록시 시작 지연 처리 (중요)
+
+위장 프록시 재생은 **두 가지 조건이 모두** 갖춰져야 libmpv 가 연다. 둘 중 하나라도
+빠지면 libmpv 가 `Failed to open` 으로 즉시 실패한다(증상: 보드 타일이 계속 로딩만
+되다 에러). 실제 단말 재현으로 확인한 사항:
+
+1. **프록시는 HTTP 응답 헤더를 즉시 flush 한다** (`StreamProxy._handle` 의
+   `response.flush()`). yt-dlp 가 첫 바이트를 내보내기까지 수 초(브라우저 TLS
+   핸드셰이크 → m3u8 → 첫 세그먼트)가 걸리는데, 그 전에 `200 OK` 헤더를 먼저
+   보내 libmpv 가 "연결은 살아 있다"고 인지하게 한다.
+2. **libmpv `network-timeout` 을 늘린다** (`BoardController._spinUpPlayer` 에서
+   `setProperty('network-timeout','60')`). 기본 타임아웃은 yt-dlp 워밍업보다 짧아
+   첫 데이터 도착 전에 포기한다. 로컬 파일·일반 링크에는 무해하다.
+
+검증: 실제 보드 파이프라인(`Player`+`VideoController`+`Video` 위젯)으로 보호 VOD 를
+열어 `720x1562` 영상이 디코드되고 재생 위치가 정상 증가함을 확인.
+
 ---
 
 ## 4. 관련 코드

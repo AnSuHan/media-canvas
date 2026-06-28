@@ -87,7 +87,15 @@ class StreamProxy {
       response.statusCode = HttpStatus.ok;
       response.headers.contentType = ContentType('video', 'mp2t');
       response.headers.set(HttpHeaders.acceptRangesHeader, 'none');
+      response.headers.set(HttpHeaders.connectionHeader, 'close');
       response.bufferOutput = false;
+
+      // Flush the response headers *immediately*, before yt-dlp has produced
+      // any bytes. yt-dlp needs a few seconds to warm up (browser-TLS handshake
+      // + fetch the m3u8 + first segment); without this, libmpv would sit with
+      // no HTTP response and hit its open-timeout, failing with "Failed to open"
+      // even though bytes were on the way.
+      await response.flush();
 
       // Drain yt-dlp's stderr so its pipe never fills and stalls the download.
       proc.stderr.drain<void>().catchError((_) {});

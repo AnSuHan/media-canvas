@@ -137,6 +137,20 @@ class BoardController extends ChangeNotifier {
     final bundle = PlayerBundle(player, controller);
     _players[item.id] = bundle;
 
+    // Browser-impersonating proxy streams (Cloudflare-protected sites) start a
+    // few seconds late — yt-dlp first does a TLS handshake, fetches the m3u8,
+    // then the first segment before any byte reaches libmpv. libmpv's default
+    // network timeout is too short for that warmup and aborts with
+    // "Failed to open". Raising it lets libmpv wait for the stream to start.
+    // Harmless for local files and normal links. Best-effort: ignore if the
+    // platform player doesn't expose setProperty.
+    final platform = player.platform;
+    if (platform != null) {
+      try {
+        await (platform as dynamic).setProperty('network-timeout', '60');
+      } catch (_) {}
+    }
+
     // Surface engine errors (bad URL, missing/corrupt file) to the UI instead
     // of spinning forever — but as a friendly message, never the raw libmpv
     // "Failed to recognize file format" string.
