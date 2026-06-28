@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -40,6 +43,33 @@ class _LogPageState extends State<LogPage> {
     super.dispose();
   }
 
+  /// Saves the entire log to a user-chosen `.txt` file in one action (the
+  /// native save dialog), so it can be attached to a bug report or kept.
+  Future<void> _saveToFile() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final stamp = DateTime.now()
+        .toIso8601String()
+        .replaceAll(':', '')
+        .replaceAll('.', '')
+        .replaceAll('-', '')
+        .substring(0, 15);
+    final bytes = utf8.encode(AppLog.instance.dump());
+    try {
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: '로그 저장',
+        fileName: 'media_canvas_log_$stamp.txt',
+        bytes: bytes, // required on Android/iOS; honored on desktop too
+        type: FileType.custom,
+        allowedExtensions: const ['txt'],
+      );
+      messenger.showSnackBar(SnackBar(
+        content: Text(path != null ? '로그를 저장했습니다: $path' : '저장이 취소되었습니다.'),
+      ));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('로그 저장 실패: $e')));
+    }
+  }
+
   Color _tagColor(String line) {
     if (line.contains('실패') ||
         line.contains('오류') ||
@@ -80,6 +110,11 @@ class _LogPageState extends State<LogPage> {
                       const SnackBar(content: Text('로그를 복사했습니다.')),
                     );
                   },
+          ),
+          IconButton(
+            tooltip: '파일로 저장(다운로드)',
+            icon: const Icon(Icons.download_outlined),
+            onPressed: lines.isEmpty ? null : _saveToFile,
           ),
           IconButton(
             tooltip: '지우기',

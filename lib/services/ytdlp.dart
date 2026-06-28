@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+
 import 'app_log.dart';
 import 'download/download_option.dart';
 
@@ -33,13 +36,85 @@ String? ytDlpExecutable() {
   if (!Platform.isWindows) return null; // only the Windows binary is bundled
   final dir = File(Platform.resolvedExecutable).parent.path;
   final sep = Platform.pathSeparator;
-  final path =
+  final bundled =
       [dir, 'data', 'flutter_assets', 'assets', 'bin', 'yt-dlp.exe'].join(sep);
-  return File(path).existsSync() ? path : null;
+  if (File(bundled).existsSync()) return bundled;
+  // A copy auto-downloaded into app-support (fallback when the bundled binary
+  // is missing — e.g. antivirus quarantined it, or the single-exe extraction
+  // dropped it). See [ensureYtDlpAvailable].
+  final cached = _downloadedPath;
+  if (cached != null && File(cached).existsSync()) return cached;
+  return null;
 }
 
 /// True if the bundled yt-dlp is present and runnable.
 bool ytDlpAvailable() => ytDlpExecutable() != null;
+
+/// Path of a yt-dlp.exe auto-downloaded into the app-support dir, if any.
+String? _downloadedPath;
+
+/// De-dupes concurrent provisioning so two simultaneous plays don't both
+/// download.
+Future<String?>? _ensureInFlight;
+
+/// Ensures a runnable yt-dlp is available, **auto-downloading it once** if the
+/// bundled copy can't be found at runtime.
+///
+/// Why this exists: the app bundles `yt-dlp.exe`, but in the field it can be
+/// missing — antivirus very often quarantines yt-dlp.exe, the single-file
+/// (SFX) build may fail to drop it, etc. Without it, Cloudflare-protected VOD
+/// sites can't play or download (the log shows "yt-dlp 없음"). As a self-heal,
+/// we fetch the official Windows build into the app-support dir and use that.
+///
+/// Returns the path, or null on non-Windows / when the download fails (logged).
+Future<String?> ensureYtDlpAvailable({http.Client? client}) {
+  final existing = ytDlpExecutable();
+  if (existing != null) return Future.value(existing);
+  if (!Platform.isWindows) return Future.value(null);
+  return _ensureInFlight ??=
+      _provisionYtDlp(client).whenComplete(() => _ensureInFlight = null);
+}
+
+Future<String?> _provisionYtDlp(http.Client? client) async {
+  try {
+    final base = await getApplicationSupportDirectory();
+    final sep = Platform.pathSeparator;
+    final binDir = Directory('${base.path}${sep}bin');
+    if (!await binDir.exists()) await binDir.create(recursive: true);
+    final dest = File('${binDir.path}${sep}yt-dlp.exe');
+
+    // Already downloaded on a previous run.
+    if (await dest.exists() && await dest.length() > 1000000) {
+      _downloadedPath = dest.path;
+      logDiag('yt-dlp', '캐시된 yt-dlp 사용: ${dest.path}');
+      return dest.path;
+    }
+
+    logDiag('yt-dlp', '번들 yt-dlp 없음 → 공식 빌드 다운로드 시도(최초 1회, ~18MB)…');
+    final own = client == null;
+    final c = client ?? http.Client();
+    try {
+      final resp = await c
+          .get(Uri.parse(
+              'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'))
+          .timeout(const Duration(seconds: 180));
+      if (resp.statusCode == 200 && resp.bodyBytes.length > 1000000) {
+        await dest.writeAsBytes(resp.bodyBytes);
+        _downloadedPath = dest.path;
+        logDiag('yt-dlp',
+            '다운로드 완료 (${resp.bodyBytes.length ~/ (1024 * 1024)}MB): ${dest.path}');
+        return dest.path;
+      }
+      logDiag('yt-dlp',
+          '다운로드 실패 status=${resp.statusCode} bytes=${resp.bodyBytes.length}');
+    } finally {
+      if (own) c.close();
+    }
+  } catch (e) {
+    logDiag('yt-dlp', '다운로드 예외: $e (백신이 차단했을 수 있음)');
+  }
+  return null;
+}
 
 const _baseArgs = ['--no-playlist', '--no-warnings'];
 

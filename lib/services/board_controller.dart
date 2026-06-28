@@ -230,6 +230,9 @@ class BoardController extends ChangeNotifier {
       // the common case keeps its fast path.)
       if (!isYouTubeUrl(item.source) && await streamNeedsImpersonation(url)) {
         logDiag('resolve', '보호 스트림 감지 → 위장 프록시 경유');
+        // Make sure yt-dlp exists (auto-downloads once if the bundle is missing)
+        // before we try to proxy — otherwise the proxy can't impersonate.
+        await ensureYtDlpAvailable();
         final proxied = await StreamProxy.instance
             .proxiedUrl(streamUrl: url, referer: item.source);
         if (proxied != null) return proxied;
@@ -273,6 +276,7 @@ class BoardController extends ChangeNotifier {
     // Cloudflare-TLS-protected stream: the built-in http path 403s, so download
     // it with the browser-impersonating yt-dlp (Referer = the page it's on).
     if (await streamNeedsImpersonation(url)) {
+      await ensureYtDlpAvailable(); // auto-download yt-dlp if the bundle is gone
       return [
         DownloadOption(
           label: '원본',

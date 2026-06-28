@@ -129,10 +129,24 @@ probe 를 건너뛴다(공통 케이스 성능 보존).
 - `libmpv` — libmpv 의 경고/오류(예: `Failed to open …`).
 - `download` — 다운로드 시작/완료/실패(code·stderr).
 
-로그는 우상단 복사 버튼으로 통째로 복사할 수 있어 버그 리포트에 붙이기 좋다.
-대표 증상별 단서: `app` 에 "yt-dlp 없음" → 번들 누락(빌드 전 `fetch_ytdlp.ps1`),
-`libmpv … Failed to open` → 프록시 시작 지연(4.x 의 헤더 flush + network-timeout),
-`download 실패 code=…` → yt-dlp stderr 에 원인.
+로그는 우상단 **복사** 버튼으로 통째로 복사하거나, **다운로드(파일로 저장)** 버튼으로
+전체 로그를 한 번에 `.txt` 파일로 저장(네이티브 저장 대화상자)할 수 있어 버그
+리포트에 붙이기 좋다. 대표 증상별 단서: `app` 에 "yt-dlp 없음" → 번들 누락/백신
+삭제(아래 자동 다운로드로 자가 복구), `libmpv … Failed to open` → 프록시 시작
+지연(4.x 의 헤더 flush + network-timeout), `download 실패 code=…` → yt-dlp stderr.
+
+### yt-dlp 자동 다운로드 (자가 복구)
+
+앱은 `assets/bin/yt-dlp.exe` 를 번들하지만, 현장에서 사라질 수 있다 — **백신이
+yt-dlp.exe 를 격리**하는 일이 매우 흔하고, 단일 exe(SFX) 추출이 누락될 수도 있다.
+이때 보호 VOD 가 재생/다운로드되지 않는다(로그에 `yt-dlp 없음 → 위장 프록시 사용
+불가 → 원본 URL 직접 전달 → Failed to open`).
+
+자가 복구: 런타임에 yt-dlp 가 안 보이면 **공식 Windows 빌드를 앱 지원 폴더
+(`getApplicationSupportDirectory()/bin/yt-dlp.exe`)로 1회 자동 다운로드**해 사용한다
+(`ensureYtDlpAvailable()`). 시작 시 백그라운드로, 그리고 보호 스트림을 만나면
+on-demand 로(중복 제거됨) 받는다. 다운로드가 막히면(백신 등) 로그에 사유가 남는다.
+탐색 순서: ① 앱 옆 번들 → ② 앱 지원 폴더의 다운로드 캐시.
 
 ## 5. 사용법
 

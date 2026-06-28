@@ -32,12 +32,22 @@ void main() {
 /// reason protected-VOD play/download fails).
 Future<void> _logStartup() async {
   logDiag('app', '시작 — ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
-  logDiag('app',
-      'yt-dlp ${ytDlpAvailable() ? "사용 가능: ${ytDlpExecutable()}" : "없음 (보호 사이트 재생/다운로드 불가)"}');
   try {
     final info = await PackageInfo.fromPlatform();
     logDiag('app', '버전 ${info.version} (${info.buildNumber})');
   } catch (_) {}
+  if (ytDlpAvailable()) {
+    logDiag('app', 'yt-dlp 사용 가능: ${ytDlpExecutable()}');
+  } else if (Platform.isWindows) {
+    logDiag('app', '번들 yt-dlp 없음 → 백그라운드 자동 다운로드 시작');
+    // Pre-provision so the first protected-site play/download is fast. On-demand
+    // calls dedupe with this via the in-flight guard.
+    final path = await ensureYtDlpAvailable();
+    logDiag('app',
+        path != null ? 'yt-dlp 준비됨: $path' : 'yt-dlp 준비 실패 (보호 사이트 불가)');
+  } else {
+    logDiag('app', 'yt-dlp 미지원 플랫폼(Windows 전용) — 보호 사이트 재생/다운로드 불가');
+  }
 }
 
 class MultimediaBoardApp extends StatelessWidget {
