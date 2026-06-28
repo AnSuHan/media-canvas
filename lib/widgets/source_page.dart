@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
@@ -14,6 +15,7 @@ import '../services/page_video_resolver.dart';
 import '../services/ytdlp.dart';
 import '../theme.dart';
 import 'log_page.dart';
+import 'webview_player_page.dart';
 
 /// The "동영상 가져오기" screen: paste a site link (e.g. a VOD page reached over a
 /// VPN), and the app pulls the underlying stream out of the page so it can be
@@ -97,6 +99,18 @@ class _SourcePageState extends State<SourcePage> {
   // ---- Play in app (add to board) ---------------------------------------
 
   Future<void> _playInApp(VideoSource src) async {
+    // On Android the desktop impersonation path isn't available, so a protected
+    // stream can't be fed to libmpv. Open the page in a WebView (Chrome TLS) —
+    // best-effort, may not play on every site.
+    if (src.needsImpersonation &&
+        !Platform.isWindows &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => WebViewPlayerPage(url: src.pageUrl, title: src.title),
+      ));
+      return;
+    }
     // Keep the *page* URL as the item source so the board re-resolves it (and
     // routes through the impersonating proxy when needed) at playback time.
     await widget.controller.addItem(MediaItem(

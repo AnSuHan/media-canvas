@@ -67,15 +67,21 @@ Future<String?>? _ensureInFlight;
 /// we fetch the official Windows build into the app-support dir and use that.
 ///
 /// Returns the path, or null on non-Windows / when the download fails (logged).
-Future<String?> ensureYtDlpAvailable({http.Client? client}) {
+Future<String?> ensureYtDlpAvailable({
+  http.Client? client,
+  void Function(double? fraction)? onProgress,
+}) {
   final existing = ytDlpExecutable();
   if (existing != null) return Future.value(existing);
   if (!Platform.isWindows) return Future.value(null);
-  return _ensureInFlight ??=
-      _provisionYtDlp(client).whenComplete(() => _ensureInFlight = null);
+  return _ensureInFlight ??= _provisionYtDlp(client, onProgress)
+      .whenComplete(() => _ensureInFlight = null);
 }
 
-Future<String?> _provisionYtDlp(http.Client? client) async {
+Future<String?> _provisionYtDlp(
+  http.Client? client,
+  void Function(double? fraction)? onProgress,
+) async {
   try {
     final base = await getApplicationSupportDirectory();
     final sep = Platform.pathSeparator;
@@ -94,19 +100,31 @@ Future<String?> _provisionYtDlp(http.Client? client) async {
     final own = client == null;
     final c = client ?? http.Client();
     try {
-      final resp = await c
-          .get(Uri.parse(
-              'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'))
-          .timeout(const Duration(seconds: 180));
-      if (resp.statusCode == 200 && resp.bodyBytes.length > 1000000) {
-        await dest.writeAsBytes(resp.bodyBytes);
-        _downloadedPath = dest.path;
-        logDiag('yt-dlp',
-            '다운로드 완료 (${resp.bodyBytes.length ~/ (1024 * 1024)}MB): ${dest.path}');
-        return dest.path;
+      final req = http.Request('GET',
+          Uri.parse('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'));
+      final resp = await c.send(req).timeout(const Duration(seconds: 180));
+      if (resp.statusCode != 200) {
+        logDiag('yt-dlp', '다운로드 실패 status=${resp.statusCode}');
+        return null;
       }
-      logDiag('yt-dlp',
-          '다운로드 실패 status=${resp.statusCode} bytes=${resp.bodyBytes.length}');
+      final total = resp.contentLength ?? 0;
+      final sink = dest.openWrite();
+      var received = 0;
+      onProgress?.call(total > 0 ? 0 : null);
+      await resp.stream.forEach((chunk) {
+        sink.add(chunk);
+        received += chunk.length;
+        if (total > 0) onProgress?.call(received / total);
+      });
+      await sink.close();
+      if (received < 1000000) {
+        logDiag('yt-dlp', '다운로드 불완전 bytes=$received');
+        return null;
+      }
+      _downloadedPath = dest.path;
+      onProgress?.call(1);
+      logDiag('yt-dlp', '다운로드 완료 (${received ~/ (1024 * 1024)}MB): ${dest.path}');
+      return dest.path;
     } finally {
       if (own) c.close();
     }

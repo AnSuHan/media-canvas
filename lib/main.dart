@@ -1,53 +1,25 @@
-import 'dart:io' show Platform;
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 
 import 'models/app_settings.dart';
 import 'models/media_item.dart';
-import 'services/app_log.dart';
 import 'services/board_controller.dart';
 import 'services/board_exporter.dart';
 import 'services/instagram_resolver.dart';
 import 'services/layout_store.dart';
 import 'services/media_url_resolver.dart';
-import 'services/ytdlp.dart';
 import 'theme.dart';
 import 'services/link_store.dart';
 import 'widgets/board_item_widget.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/source_page.dart';
+import 'widgets/splash_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized(); // required on Windows & Android
-  _logStartup();
   runApp(const MultimediaBoardApp());
-}
-
-/// Records environment facts at launch so the diagnostic log always opens with
-/// which build is running and whether the bundled yt-dlp was found (the #1
-/// reason protected-VOD play/download fails).
-Future<void> _logStartup() async {
-  logDiag('app', '시작 — ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
-  try {
-    final info = await PackageInfo.fromPlatform();
-    logDiag('app', '버전 ${info.version} (${info.buildNumber})');
-  } catch (_) {}
-  if (ytDlpAvailable()) {
-    logDiag('app', 'yt-dlp 사용 가능: ${ytDlpExecutable()}');
-  } else if (Platform.isWindows) {
-    logDiag('app', '번들 yt-dlp 없음 → 백그라운드 자동 다운로드 시작');
-    // Pre-provision so the first protected-site play/download is fast. On-demand
-    // calls dedupe with this via the in-flight guard.
-    final path = await ensureYtDlpAvailable();
-    logDiag('app',
-        path != null ? 'yt-dlp 준비됨: $path' : 'yt-dlp 준비 실패 (보호 사이트 불가)');
-  } else {
-    logDiag('app', 'yt-dlp 미지원 플랫폼(Windows 전용) — 보호 사이트 재생/다운로드 불가');
-  }
 }
 
 class MultimediaBoardApp extends StatelessWidget {
@@ -58,7 +30,7 @@ class MultimediaBoardApp extends StatelessWidget {
       title: 'Media Canvas',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
-      home: const BoardPage(),
+      home: SplashPage(onReady: (_) => const BoardPage()),
     );
   }
 }

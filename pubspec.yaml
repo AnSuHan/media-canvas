@@ -32,6 +32,12 @@ dependencies:
   http: ^1.2.2
   youtube_explode_dart: ^3.1.0
 
+  # Android-only fallback player for Cloudflare-TLS-protected sites: a WebView
+  # has Chrome's TLS fingerprint, so it can load pages the desktop yt-dlp path
+  # handles via impersonation (which isn't available on Android). Unused on
+  # Windows (no desktop implementation; guarded by Platform.isAndroid).
+  webview_flutter: ^4.7.0
+
   # Parse DASH (.mpd) manifests when downloading adaptive streams.
   xml: ^6.5.0
   # AES-128 decryption for fetching AES-encrypted HLS segments.
