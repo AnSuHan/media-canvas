@@ -11,6 +11,7 @@ import 'download/download.dart';
 import 'hls_ad_filter.dart';
 import 'instagram_resolver.dart';
 import 'media_url_resolver.dart';
+import 'stream_proxy.dart';
 import 'ytdlp.dart';
 import 'youtube_resolver.dart' show listYouTubeStreams;
 
@@ -192,6 +193,17 @@ class BoardController extends ChangeNotifier {
   Future<String> _resolvePlayable(MediaItem item) async {
     if (item.sourceKind == SourceKind.network) {
       final url = await resolvePlayableUrl(item.source);
+      // Some CDNs (a Cloudflare TLS-fingerprint block) 403 libmpv no matter the
+      // headers. When detected, route the stream through the local proxy, which
+      // fetches it with a browser-impersonating yt-dlp and pipes MPEG-TS to
+      // libmpv over localhost. The original page URL is the required Referer.
+      // (YouTube resolves to googlevideo, never TLS-blocked — skip the probe so
+      // the common case keeps its fast path.)
+      if (!isYouTubeUrl(item.source) && await streamNeedsImpersonation(url)) {
+        final proxied = await StreamProxy.instance
+            .proxiedUrl(streamUrl: url, referer: item.source);
+        if (proxied != null) return proxied;
+      }
       // If the resolved stream is HLS with server-stitched ads (SSAI), hand
       // libmpv a rewritten playlist that skips the ad segments. Falls back to
       // the original URL when there's nothing to strip or it can't be fetched.
@@ -225,6 +237,21 @@ class BoardController extends ChangeNotifier {
       ];
     }
     final url = await resolvePlayableUrl(src);
+    // Cloudflare-TLS-protected stream: the built-in http path 403s, so download
+    // it with the browser-impersonating yt-dlp (Referer = the page it's on).
+    if (await streamNeedsImpersonation(url)) {
+      return [
+        DownloadOption(
+          label: '원본',
+          url: url,
+          adaptive: false,
+          ytdlpUrl: url,
+          ytdlpFormat: 'best',
+          impersonate: true,
+          referer: src,
+        ),
+      ];
+    }
     if (isAdaptiveStream(url)) {
       final qualities = await listAdaptiveQualities(url);
       return qualities.isNotEmpty
@@ -499,6 +526,8 @@ class BoardController extends ChangeNotifier {
   @override
   void dispose() {
     WakelockPlus.disable();
+    // Stop any browser-impersonating yt-dlp processes feeding the proxy.
+    StreamProxy.instance.shutdown();
     for (final b in _players.values) {
       b.player.dispose();
     }

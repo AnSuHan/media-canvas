@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/app_settings.dart';
 import '../theme.dart';
@@ -15,6 +16,27 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   late AppSettings s = widget.initial.copy();
+
+  /// App version shown in the 정보 section (e.g. `1.0.4 (5)`); loaded from the
+  /// platform package info so it always matches the installed build.
+  String _version = '…';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() => _version = '${info.version} (${info.buildNumber})');
+      }
+    } catch (_) {
+      if (mounted) setState(() => _version = '알 수 없음');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -95,8 +117,21 @@ class _SettingsPageState extends State<SettingsPage> {
               s.confirmRemove, (v) => setState(() => s.confirmRemove = v)),
           _switchTile('Keep screen awake', 'Prevent sleep while board is open',
               s.keepAwake, (v) => setState(() => s.keepAwake = v)),
+
+          _section('정보'),
+          _infoTile('Media Canvas', '버전 $_version'),
         ],
       ),
+    );
+  }
+
+  /// A read-only info row (e.g. the app version).
+  Widget _infoTile(String title, String value) {
+    return ListTile(
+      leading: const Icon(Icons.info_outline, color: AppColors.brass),
+      title: Text(title, style: const TextStyle(color: AppColors.text)),
+      subtitle: Text(value,
+          style: const TextStyle(color: AppColors.textDim, fontSize: 12)),
     );
   }
 

@@ -10,8 +10,10 @@ import 'services/instagram_resolver.dart';
 import 'services/layout_store.dart';
 import 'services/media_url_resolver.dart';
 import 'theme.dart';
+import 'services/link_store.dart';
 import 'widgets/board_item_widget.dart';
 import 'widgets/settings_page.dart';
+import 'widgets/source_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,6 +43,7 @@ class BoardPage extends StatefulWidget {
 class _BoardPageState extends State<BoardPage> {
   final BoardController controller = BoardController();
   final LayoutStore store = LayoutStore();
+  final LinkStore linkStore = LinkStore();
   int _idSeed = 0;
 
   /// Whether the top toolbar is shown. Tapping the empty canvas toggles it,
@@ -334,6 +337,23 @@ class _BoardPageState extends State<BoardPage> {
     }
   }
 
+  // ---- Fetch from a web page (URL library) -------------------------------
+
+  /// Opens the "동영상 가져오기" screen, where the user pastes a site link to pull
+  /// the embedded stream, play it in-app, download it, and save it for later.
+  Future<void> _openSourcePage() async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SourcePage(
+          controller: controller,
+          linkStore: linkStore,
+          newId: _newId,
+        ),
+      ),
+    );
+  }
+
   // ---- Settings ----------------------------------------------------------
 
   Future<void> _openSettings() async {
@@ -390,6 +410,7 @@ class _BoardPageState extends State<BoardPage> {
                         count: controller.items.length,
                         onAddLocal: () => _pickLocal(true),
                         onAddUrl: () => _addUrl(true),
+                        onFetch: _openSourcePage,
                         onPlayAll: controller.playAll,
                         onPauseAll: controller.pauseAll,
                         onMuteAll: controller.muteAll,
@@ -406,6 +427,7 @@ class _BoardPageState extends State<BoardPage> {
                         count: controller.items.length,
                         onAddLocal: () => _pickLocal(false),
                         onAddUrl: () => _addUrl(false),
+                        onFetch: _openSourcePage,
                         onPlayAll: controller.playAll,
                         onPauseAll: controller.pauseAll,
                         onMuteAll: controller.muteAll,
@@ -545,6 +567,7 @@ class _WideBar extends StatelessWidget {
     required this.count,
     required this.onAddLocal,
     required this.onAddUrl,
+    required this.onFetch,
     required this.onPlayAll,
     required this.onPauseAll,
     required this.onMuteAll,
@@ -558,7 +581,7 @@ class _WideBar extends StatelessWidget {
   });
   final String boardName;
   final int count;
-  final VoidCallback onAddLocal, onAddUrl, onPlayAll, onPauseAll;
+  final VoidCallback onAddLocal, onAddUrl, onFetch, onPlayAll, onPauseAll;
   final VoidCallback onMuteAll, onUnmuteAll, onSave, onLoad;
   final VoidCallback onExportFile, onImportFile, onExportImage, onSettings;
 
@@ -589,6 +612,7 @@ class _WideBar extends StatelessWidget {
               _SegGroup(children: [
                 _TBtn(Icons.video_call_outlined, 'Add files', onAddLocal),
                 _TBtn(Icons.link, 'Add URL', onAddUrl),
+                _TBtn(Icons.travel_explore, '동영상 가져오기', onFetch),
               ]),
               const SizedBox(width: 8),
               _SegGroup(children: [
@@ -667,6 +691,7 @@ class _CompactBar extends StatelessWidget {
     required this.count,
     required this.onAddLocal,
     required this.onAddUrl,
+    required this.onFetch,
     required this.onPlayAll,
     required this.onPauseAll,
     required this.onMuteAll,
@@ -680,7 +705,7 @@ class _CompactBar extends StatelessWidget {
   });
   final String boardName;
   final int count;
-  final VoidCallback onAddLocal, onAddUrl, onPlayAll, onPauseAll;
+  final VoidCallback onAddLocal, onAddUrl, onFetch, onPlayAll, onPauseAll;
   final VoidCallback onMuteAll, onUnmuteAll, onSave, onLoad;
   final VoidCallback onExportFile, onImportFile, onExportImage, onSettings;
 
@@ -717,6 +742,8 @@ class _CompactBar extends StatelessWidget {
                 onAddLocal();
               case 'url':
                 onAddUrl();
+              case 'fetch':
+                onFetch();
             }
           },
           itemBuilder: (_) => const [
@@ -725,6 +752,9 @@ class _CompactBar extends StatelessWidget {
                 child: _MenuRow(Icons.video_call_outlined, 'Add files')),
             PopupMenuItem(
                 value: 'url', child: _MenuRow(Icons.link, 'Add URL')),
+            PopupMenuItem(
+                value: 'fetch',
+                child: _MenuRow(Icons.travel_explore, '동영상 가져오기')),
           ],
         ),
         PopupMenuButton<String>(

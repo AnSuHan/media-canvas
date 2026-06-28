@@ -14,6 +14,8 @@ class DownloadOption {
     this.dashBandwidth,
     this.ytdlpUrl,
     this.ytdlpFormat,
+    this.impersonate = false,
+    this.referer,
   });
 
   /// What the picker shows, e.g. `720p` or `1200 kbps`.
@@ -42,6 +44,13 @@ class DownloadOption {
   /// selector/id. Used for sites the built-in extractor can't reach.
   final String? ytdlpUrl;
   final String? ytdlpFormat;
+
+  /// When true, yt-dlp impersonates a browser (TLS handshake + headers) to get
+  /// past a Cloudflare-TLS block on the stream host, sending [referer] as the
+  /// page the stream was found on (hotlink protection). Only meaningful
+  /// together with [ytdlpUrl].
+  final bool impersonate;
+  final String? referer;
 
   /// True if this option must be fetched via yt-dlp.
   bool get isYtDlp => ytdlpUrl != null;

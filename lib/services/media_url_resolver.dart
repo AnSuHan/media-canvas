@@ -111,6 +111,76 @@ Future<String> resolvePlayableUrl(String original) async {
   return url;
 }
 
+/// All distinct, non-ad stream URLs (m3u8 / mpd / mp4 / …) embedded in [html],
+/// best-source first. Public wrapper around the internal extractor so the
+/// page-info resolver ([resolveVideoSource]) can reuse the exact same scraping
+/// rules the player uses.
+List<String> extractStreamCandidates(String html, {required Uri base}) =>
+    _extractCandidates(html, base: base);
+
+/// The absolute `content` of the first matching `<meta>` tag among [props]
+/// (e.g. `og:image`), resolved to an absolute URL, or null. Use for *URL*-typed
+/// meta (thumbnails); for free text (a title) use [extractMetaText].
+String? extractMetaContent(String html, List<String> props, {required Uri base}) =>
+    _firstMetaContent(html, props, base: base);
+
+/// The raw, unescaped text of the first matching `<meta>` tag among [props]
+/// (e.g. `og:title`), or null — *without* resolving it as a URL, so a plain
+/// title isn't mangled into `https://…/A%20Title`.
+String? extractMetaText(String html, List<String> props) {
+  for (final prop in props) {
+    final p = RegExp.escape(prop);
+    for (final re in [
+      RegExp(
+        '<meta[^>]*?(?:property|name)\\s*=\\s*["\']$p["\'][^>]*?content\\s*=\\s*["\']([^"\']*)["\']',
+        caseSensitive: false,
+      ),
+      RegExp(
+        '<meta[^>]*?content\\s*=\\s*["\']([^"\']*)["\'][^>]*?(?:property|name)\\s*=\\s*["\']$p["\']',
+        caseSensitive: false,
+      ),
+    ]) {
+      final m = re.firstMatch(html);
+      if (m != null) {
+        final v = _unescape(m.group(1)!.trim());
+        if (v.isNotEmpty) return v;
+      }
+    }
+  }
+  return null;
+}
+
+/// True when [streamUrl] is served by a host that blocks normal clients (a
+/// Cloudflare TLS-fingerprint block) and therefore must be played/downloaded
+/// through the browser-impersonating yt-dlp path instead of libmpv/Dart http.
+///
+/// Detection is a cheap range probe with Dart's own http client — the exact
+/// client that gets rejected — so a `403` (or a Cloudflare challenge body) is a
+/// reliable "needs impersonation" signal. Any other outcome (200/206, a network
+/// error, a timeout) returns false so normal links keep their fast direct path.
+Future<bool> streamNeedsImpersonation(String streamUrl, {http.Client? client}) async {
+  final ownClient = client == null;
+  final c = client ?? http.Client();
+  try {
+    final resp = await c.get(
+      Uri.parse(streamUrl),
+      headers: {..._browserHeaders, 'Range': 'bytes=0-1'},
+    ).timeout(const Duration(seconds: 8));
+    if (resp.statusCode == 403) return true;
+    // Cloudflare sometimes wraps the block in a 503/429 challenge page.
+    if (resp.statusCode == 503 || resp.statusCode == 429) {
+      final body = resp.body.toLowerCase();
+      return body.contains('cloudflare') &&
+          (body.contains('attention required') || body.contains('cf-'));
+    }
+    return false;
+  } catch (_) {
+    return false;
+  } finally {
+    if (ownClient) c.close();
+  }
+}
+
 /// The classified result of a pasted link: the URL to hand the engine plus how
 /// it should be rendered (video / image / gif). [forVideoSource] is the URL to
 /// store on a *video* item — always the original page link, so re-resolution

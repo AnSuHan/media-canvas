@@ -42,6 +42,48 @@ bool ytDlpAvailable() => ytDlpExecutable() != null;
 
 const _baseArgs = ['--no-playlist', '--no-warnings'];
 
+/// The browser yt-dlp impersonates (TLS/JA3 fingerprint + headers) when a site
+/// hides its stream behind Cloudflare's anti-bot / TLS-fingerprint blocking.
+/// Some CDNs (e.g. Cloudflare-fronted VOD hosts) return 403 to *every*
+/// non-browser client — libmpv, Dart's http, plain curl — no matter the
+/// headers; only a real browser TLS handshake passes. yt-dlp ships curl_cffi,
+/// so `--impersonate chrome` reproduces that handshake.
+const _impersonate = 'chrome';
+
+/// Builds the impersonation + referer arguments shared by the streaming and
+/// download paths. [referer] is the page the stream was found on; many CDNs
+/// hotlink-protect the stream and require it.
+List<String> _impersonateArgs({String? referer}) => [
+      '--impersonate', _impersonate,
+      if (referer != null && referer.isNotEmpty) ...['--add-header', 'Referer:$referer'],
+    ];
+
+/// Starts yt-dlp streaming [streamUrl] as a continuous **MPEG-TS** byte stream
+/// on stdout, impersonating a browser so Cloudflare-TLS-protected hosts serve
+/// it. The returned [Process]'s stdout is piped to libmpv by [StreamProxy].
+///
+/// `--hls-use-mpegts` keeps the muxed output a streamable TS (playable while
+/// still downloading) instead of an mp4 that's only finalized at the end.
+/// Throws a [ProcessException] when yt-dlp isn't bundled.
+Future<Process> ytDlpStreamMpegTs(
+  String streamUrl, {
+  String? referer,
+  String format = 'best',
+}) {
+  final exe = ytDlpExecutable();
+  if (exe == null) {
+    throw const ProcessException('yt-dlp', [], 'yt-dlp is not available', 1);
+  }
+  return Process.start(exe, [
+    ..._baseArgs,
+    ..._impersonateArgs(referer: referer),
+    '--hls-use-mpegts',
+    '-f', format,
+    '-o', '-',
+    streamUrl,
+  ]);
+}
+
 /// Picks a *single-file* (progressive, muxed) format so playback has audio and
 /// downloads need no ffmpeg merge. Falls back through best-with-audio to best.
 const _muxedFormat = 'best[ext=mp4]/best[acodec!=none][vcodec!=none]/best';
@@ -144,6 +186,8 @@ Future<String> ytDlpDownload(
   String url,
   String savePath, {
   String? format,
+  bool impersonate = false,
+  String? referer,
   YtDlpProgress? onProgress,
   void Function(Process proc)? onStart,
 }) async {
@@ -154,6 +198,9 @@ Future<String> ytDlpDownload(
   final fmt = format ?? _muxedFormat;
   final proc = await Process.start(exe, [
     ..._baseArgs,
+    // Cloudflare-TLS-protected hosts (e.g. some VOD CDNs) 403 every non-browser
+    // client; impersonate a browser so the segments download.
+    if (impersonate) ..._impersonateArgs(referer: referer),
     '--newline',
     '--no-part',
     '-f', fmt,

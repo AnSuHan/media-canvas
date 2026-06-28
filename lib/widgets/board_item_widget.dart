@@ -293,6 +293,8 @@ class _BoardItemWidgetState extends State<BoardItemWidget> {
           option.ytdlpUrl!,
           saveTo,
           format: option.ytdlpFormat,
+          impersonate: option.impersonate,
+          referer: option.referer,
           onStart: (proc) => ytProc = proc,
           onProgress: (fraction) {
             if (fraction != null) progress.value = fraction;
