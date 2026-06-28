@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'app_log.dart';
 import 'download/download_option.dart';
 
 /// Drives the **bundled yt-dlp** binary so the app plays and downloads videos
@@ -196,6 +197,8 @@ Future<String> ytDlpDownload(
     throw const ProcessException('yt-dlp', [], 'yt-dlp is not available', 1);
   }
   final fmt = format ?? _muxedFormat;
+  logDiag('download',
+      '시작 impersonate=$impersonate fmt=$fmt → $savePath ($url)');
   final proc = await Process.start(exe, [
     ..._baseArgs,
     // Cloudflare-TLS-protected hosts (e.g. some VOD CDNs) 403 every non-browser
@@ -222,8 +225,10 @@ Future<String> ytDlpDownload(
 
   final code = await proc.exitCode;
   if (code != 0) {
-    throw ProcessException('yt-dlp', ['-f', fmt, url],
-        stderrBuf.isEmpty ? 'download failed' : stderrBuf.toString().trim(), code);
+    final err = stderrBuf.isEmpty ? 'download failed' : stderrBuf.toString().trim();
+    logDiag('download', '실패 code=$code: $err');
+    throw ProcessException('yt-dlp', ['-f', fmt, url], err, code);
   }
+  logDiag('download', '완료 → $savePath');
   return savePath;
 }

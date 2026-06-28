@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 
 import '../models/media_item.dart' show MediaKind;
+import 'app_log.dart';
 import 'ytdlp.dart';
 import 'youtube_resolver.dart';
 
@@ -166,6 +167,7 @@ Future<bool> streamNeedsImpersonation(String streamUrl, {http.Client? client}) a
       Uri.parse(streamUrl),
       headers: {..._browserHeaders, 'Range': 'bytes=0-1'},
     ).timeout(const Duration(seconds: 8));
+    logDiag('probe', '보호 판별 status=${resp.statusCode} ($streamUrl)');
     if (resp.statusCode == 403) return true;
     // Cloudflare sometimes wraps the block in a 503/429 challenge page.
     if (resp.statusCode == 503 || resp.statusCode == 429) {
@@ -174,7 +176,8 @@ Future<bool> streamNeedsImpersonation(String streamUrl, {http.Client? client}) a
           (body.contains('attention required') || body.contains('cf-'));
     }
     return false;
-  } catch (_) {
+  } catch (e) {
+    logDiag('probe', '보호 판별 예외(→일반으로 처리): $e');
     return false;
   } finally {
     if (ownClient) c.close();

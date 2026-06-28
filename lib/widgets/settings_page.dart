@@ -3,6 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/app_settings.dart';
 import '../theme.dart';
+import 'log_page.dart';
 
 /// Full settings screen. Edits a working copy and hands it back on save so the
 /// caller can persist and apply it.
@@ -120,6 +121,17 @@ class _SettingsPageState extends State<SettingsPage> {
 
           _section('정보'),
           _infoTile('Media Canvas', '버전 $_version'),
+          ListTile(
+            leading: const Icon(Icons.bug_report_outlined, color: AppColors.brass),
+            title: const Text('진단 로그 보기',
+                style: TextStyle(color: AppColors.text)),
+            subtitle: const Text('재생·다운로드가 안 될 때 원인 확인',
+                style: TextStyle(color: AppColors.textDim, fontSize: 12)),
+            trailing: const Icon(Icons.chevron_right, color: AppColors.textDim),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const LogPage()),
+            ),
+          ),
         ],
       ),
     );

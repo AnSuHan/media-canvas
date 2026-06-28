@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 
 import '../models/video_source.dart';
+import 'app_log.dart';
 import 'media_url_resolver.dart';
 import 'ytdlp.dart';
 
@@ -36,6 +37,7 @@ Future<VideoSource?> resolveVideoSource(
   if (base == null || !(base.scheme == 'http' || base.scheme == 'https')) {
     return null;
   }
+  logDiag('fetch', '가져오기 시작: $url');
 
   final ownClient = client == null;
   final c = client ?? http.Client();
@@ -62,7 +64,10 @@ Future<VideoSource?> resolveVideoSource(
 
     final html = resp.body;
     final candidates = extractStreamCandidates(html, base: base);
-    if (candidates.isEmpty) return null;
+    if (candidates.isEmpty) {
+      logDiag('fetch', '페이지에서 재생할 스트림을 찾지 못함');
+      return null;
+    }
 
     // Prefer a progressive file (instant seek, has audio); else the first
     // stream (usually the HLS master) — same rule the player uses.
@@ -74,16 +79,18 @@ Future<VideoSource?> resolveVideoSource(
         html, const ['og:image:secure_url', 'og:image', 'twitter:image'],
         base: base);
 
+    final needs = await streamNeedsImpersonation(streamUrl, client: client);
+    logDiag('fetch', '스트림=$streamUrl 보호=$needs 제목="$title"');
     return VideoSource(
       pageUrl: url,
       streamUrl: streamUrl,
       referer: url,
-      needsImpersonation:
-          await streamNeedsImpersonation(streamUrl, client: client),
+      needsImpersonation: needs,
       title: title,
       thumbnail: thumb,
     );
-  } catch (_) {
+  } catch (e) {
+    logDiag('fetch', '가져오기 예외: $e');
     return null;
   } finally {
     if (ownClient) c.close();

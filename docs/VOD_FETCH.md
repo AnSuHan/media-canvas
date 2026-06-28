@@ -115,6 +115,25 @@ probe 를 건너뛴다(공통 케이스 성능 보존).
 
 ---
 
+## 4.5 진단 로그 (재생/다운로드가 안 될 때)
+
+앱에 **진단 로그 뷰어**가 있다. "동영상 가져오기" 화면 우상단 🐞 아이콘, 또는
+설정 → 정보 → "진단 로그 보기" 로 연다. 각 단계가 시간순으로 기록된다:
+
+- `app` — 시작 시 OS·앱 버전·**yt-dlp 사용 가능 여부/경로** (보호 사이트 실패의 1순위 원인).
+- `fetch` — 페이지 가져오기 결과(스트림 URL·보호 여부·제목).
+- `probe` — 보호 판별 HTTP status(403 이면 위장 경로).
+- `resolve` — 재생 해석 결과와 위장 프록시 경유 여부.
+- `proxy` — 프록시 등록/요청, yt-dlp 스폰(pid), 헤더 전송, 전송량, 종료 code.
+- `yt-dlp` — yt-dlp 자체 경고/오류(stderr).
+- `libmpv` — libmpv 의 경고/오류(예: `Failed to open …`).
+- `download` — 다운로드 시작/완료/실패(code·stderr).
+
+로그는 우상단 복사 버튼으로 통째로 복사할 수 있어 버그 리포트에 붙이기 좋다.
+대표 증상별 단서: `app` 에 "yt-dlp 없음" → 번들 누락(빌드 전 `fetch_ytdlp.ps1`),
+`libmpv … Failed to open` → 프록시 시작 지연(4.x 의 헤더 flush + network-timeout),
+`download 실패 code=…` → yt-dlp stderr 에 원인.
+
 ## 5. 사용법
 
 1. 앱 실행: `flutter run -d windows`

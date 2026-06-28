@@ -7,6 +7,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../models/app_settings.dart';
 import '../models/media_item.dart';
+import 'app_log.dart';
 import 'download/download.dart';
 import 'hls_ad_filter.dart';
 import 'instagram_resolver.dart';
@@ -148,15 +149,27 @@ class BoardController extends ChangeNotifier {
     if (platform != null) {
       try {
         await (platform as dynamic).setProperty('network-timeout', '60');
-      } catch (_) {}
+        logDiag('player', 'network-timeout=60 설정');
+      } catch (e) {
+        logDiag('player', 'network-timeout 설정 실패: $e');
+      }
     }
 
     // Surface engine errors (bad URL, missing/corrupt file) to the UI instead
     // of spinning forever — but as a friendly message, never the raw libmpv
     // "Failed to recognize file format" string.
     player.stream.error.listen((e) {
+      logDiag('libmpv', 'error: $e');
       bundle.error = _friendlyError(e);
       notifyListeners();
+    });
+    // Pipe libmpv's own warnings/errors into the in-app log so the user can see
+    // the real cause (e.g. "Failed to open …") when a stream won't play.
+    player.stream.log.listen((e) {
+      final lvl = e.level.toLowerCase();
+      if (lvl == 'error' || lvl == 'warn' || lvl == 'fatal') {
+        logDiag('libmpv', '${e.prefix}/${e.level}: ${e.text.trim()}');
+      }
     });
 
     try {
@@ -206,7 +219,9 @@ class BoardController extends ChangeNotifier {
   /// files go through [_resolveSource].
   Future<String> _resolvePlayable(MediaItem item) async {
     if (item.sourceKind == SourceKind.network) {
+      logDiag('resolve', '재생 해석 시작: ${item.source}');
       final url = await resolvePlayableUrl(item.source);
+      logDiag('resolve', '스트림 = $url');
       // Some CDNs (a Cloudflare TLS-fingerprint block) 403 libmpv no matter the
       // headers. When detected, route the stream through the local proxy, which
       // fetches it with a browser-impersonating yt-dlp and pipes MPEG-TS to
@@ -214,9 +229,13 @@ class BoardController extends ChangeNotifier {
       // (YouTube resolves to googlevideo, never TLS-blocked — skip the probe so
       // the common case keeps its fast path.)
       if (!isYouTubeUrl(item.source) && await streamNeedsImpersonation(url)) {
+        logDiag('resolve', '보호 스트림 감지 → 위장 프록시 경유');
         final proxied = await StreamProxy.instance
             .proxiedUrl(streamUrl: url, referer: item.source);
         if (proxied != null) return proxied;
+        logDiag('resolve', '프록시 사용 불가 → 원본 URL 직접 전달(실패 가능)');
+      } else {
+        logDiag('resolve', '일반 스트림 → 직접 재생');
       }
       // If the resolved stream is HLS with server-stitched ads (SSAI), hand
       // libmpv a rewritten playlist that skips the ad segments. Falls back to

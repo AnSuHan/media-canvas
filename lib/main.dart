@@ -1,14 +1,19 @@
+import 'dart:io' show Platform;
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'models/app_settings.dart';
 import 'models/media_item.dart';
+import 'services/app_log.dart';
 import 'services/board_controller.dart';
 import 'services/board_exporter.dart';
 import 'services/instagram_resolver.dart';
 import 'services/layout_store.dart';
 import 'services/media_url_resolver.dart';
+import 'services/ytdlp.dart';
 import 'theme.dart';
 import 'services/link_store.dart';
 import 'widgets/board_item_widget.dart';
@@ -18,7 +23,21 @@ import 'widgets/source_page.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized(); // required on Windows & Android
+  _logStartup();
   runApp(const MultimediaBoardApp());
+}
+
+/// Records environment facts at launch so the diagnostic log always opens with
+/// which build is running and whether the bundled yt-dlp was found (the #1
+/// reason protected-VOD play/download fails).
+Future<void> _logStartup() async {
+  logDiag('app', '시작 — ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
+  logDiag('app',
+      'yt-dlp ${ytDlpAvailable() ? "사용 가능: ${ytDlpExecutable()}" : "없음 (보호 사이트 재생/다운로드 불가)"}');
+  try {
+    final info = await PackageInfo.fromPlatform();
+    logDiag('app', '버전 ${info.version} (${info.buildNumber})');
+  } catch (_) {}
 }
 
 class MultimediaBoardApp extends StatelessWidget {

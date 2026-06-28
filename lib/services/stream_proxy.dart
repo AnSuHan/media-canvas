@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'app_log.dart';
 import 'ytdlp.dart';
 
 /// A tiny local HTTP server that lets libmpv play streams whose CDN blocks
@@ -42,11 +44,16 @@ class StreamProxy {
     String? referer,
     String format = 'best',
   }) async {
-    if (!ytDlpAvailable()) return null;
+    if (!ytDlpAvailable()) {
+      logDiag('proxy', 'yt-dlp 없음 → 위장 프록시 사용 불가 (재생/다운로드 실패 가능)');
+      return null;
+    }
     final server = await _ensureServer();
     final id = (++_seq).toString();
     _streams[id] = _Stream(streamUrl, referer, format);
-    return 'http://127.0.0.1:${server.port}/s/$id';
+    final url = 'http://127.0.0.1:${server.port}/s/$id';
+    logDiag('proxy', '등록 id=$id → $url (referer=$referer)');
+    return url;
   }
 
   Future<HttpServer> _ensureServer() async {
@@ -74,6 +81,7 @@ class StreamProxy {
       return;
     }
 
+    logDiag('proxy', 'libmpv 연결: ${request.method} ${request.uri.path}');
     Process? proc;
     try {
       proc = await ytDlpStreamMpegTs(
@@ -82,6 +90,7 @@ class StreamProxy {
         format: stream.format,
       );
       _live.add(proc);
+      logDiag('proxy', 'yt-dlp 스폰(impersonate) pid=${proc.pid}, 첫 바이트 대기…');
       // A continuous MPEG-TS byte stream — served without a Content-Length so
       // libmpv reads it progressively as a live source.
       response.statusCode = HttpStatus.ok;
@@ -96,14 +105,28 @@ class StreamProxy {
       // no HTTP response and hit its open-timeout, failing with "Failed to open"
       // even though bytes were on the way.
       await response.flush();
+      logDiag('proxy', 'HTTP 200 헤더 전송 완료 (libmpv 가 연결 유지)');
 
-      // Drain yt-dlp's stderr so its pipe never fills and stalls the download.
-      proc.stderr.drain<void>().catchError((_) {});
+      // Surface yt-dlp's stderr (warnings/errors) into the in-app log so a
+      // failure cause is visible; also drains the pipe so it never stalls.
+      var bytes = 0;
+      proc.stderr
+          .transform(const SystemEncoding().decoder)
+          .transform(const LineSplitter())
+          .listen((line) {
+        final l = line.trim();
+        if (l.isNotEmpty) logDiag('yt-dlp', l);
+      }, onError: (_) {});
 
-      await response.addStream(proc.stdout);
+      await response.addStream(proc.stdout.map((chunk) {
+        bytes += chunk.length;
+        return chunk;
+      }));
       await response.close();
-      await proc.exitCode;
-    } catch (_) {
+      final code = await proc.exitCode;
+      logDiag('proxy', 'yt-dlp 종료 code=$code, 전송 ${bytes ~/ 1024}KB');
+    } catch (e) {
+      logDiag('proxy', '오류: $e');
       try {
         response.statusCode = HttpStatus.internalServerError;
         await response.close();

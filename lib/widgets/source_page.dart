@@ -13,6 +13,7 @@ import '../services/link_store.dart';
 import '../services/page_video_resolver.dart';
 import '../services/ytdlp.dart';
 import '../theme.dart';
+import 'log_page.dart';
 
 /// The "동영상 가져오기" screen: paste a site link (e.g. a VOD page reached over a
 /// VPN), and the app pulls the underlying stream out of the page so it can be
@@ -317,6 +318,15 @@ class _SourcePageState extends State<SourcePage> {
         backgroundColor: AppColors.panel,
         foregroundColor: AppColors.text,
         title: const Text('동영상 가져오기'),
+        actions: [
+          IconButton(
+            tooltip: '진단 로그',
+            icon: const Icon(Icons.bug_report_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const LogPage()),
+            ),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
